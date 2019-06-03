@@ -91,6 +91,12 @@ impl LdapConn {
         rt.block_on(async move { ldap.sasl_external_bind().await })
     }
 
+    pub fn sasl_spnego_bind(&mut self, username: &str, password: &str) -> Result<LdapResult> {
+        let rt = Arc::get_mut(&mut self.rt).expect("runtime ref");
+        let ldap = &mut self.ldap;
+        rt.block_on(async move { ldap.sasl_spnego_bind(username, password).await })
+    }
+
     /// See [`Ldap::search()`](struct.Ldap.html#method.search).
     pub fn search<S: AsRef<str>>(
         &mut self,

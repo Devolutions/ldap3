@@ -12,7 +12,7 @@ use crate::result::{
 };
 use crate::search::parse_refs;
 use crate::search::{Scope, SearchOptions, SearchStream};
-use crate::RequestId;
+use crate::{RequestId, spnego};
 
 use lber::common::TagClass;
 use lber::structures::{Boolean, Enumerated, Integer, Null, OctetString, Sequence, Set, Tag};
@@ -235,7 +235,27 @@ impl Ldap {
         Ok(self.op_call(LdapOp::Single, req).await?.0)
     }
 
-    /// Perform a Search with the given base DN (`base`), scope, filter, and
+    /// Do a SASL SPNEGO bind on the connection.
+    pub async fn sasl_spnego_bind(&mut self, username: &str, password: &str) -> Result<LdapResult> {
+        let mut spnego_client = spnego::Client::new(username, password);
+
+        let input = Vec::new();
+        let mut output = Vec::new();
+        let _sspi_status = spnego_client.authenticate(input.as_slice(), &mut output).unwrap();
+        let req = create_spnego_bind_request(output.clone());
+
+        let ldap = self.clone();
+        let (mut result, exop) = self.op_call(LdapOp::Single, req).await?;
+
+        let input = result.get_bind_token().unwrap();
+        let mut output = Vec::new();
+        let _sspi_status = spnego_client.authenticate(input.as_slice(), &mut output).unwrap();
+        let req = create_spnego_bind_request(output.clone());
+
+        Ok(self.op_call(LdapOp::Single, req).await?.0)
+    }
+
+        /// Perform a Search with the given base DN (`base`), scope, filter, and
     /// the list of attributes to be returned (`attrs`). If `attrs` is empty,
     /// or if it contains a special name `*` (asterisk), return all (user) attributes.
     /// Requesting a special name `+` (plus sign) will return all operational
@@ -555,4 +575,35 @@ impl Ldap {
             .await
             .map(|_| ())?)
     }
+}
+
+fn create_spnego_bind_request(token: Vec<u8>) -> Tag {
+    Tag::Sequence(Sequence {
+        id: 0,
+        class: TagClass::Application,
+        inner: vec![
+            Tag::Integer(Integer {
+                inner: 3,
+                .. Default::default()
+            }),
+            Tag::OctetString(OctetString {
+                inner: Vec::new(),
+                .. Default::default()
+            }),
+            Tag::Sequence(Sequence {
+                id: 3,
+                class: TagClass::Context,
+                inner: vec![
+                    Tag::OctetString(OctetString {
+                        inner: Vec::from("GSS-SPNEGO"),
+                        .. Default::default()
+                    }),
+                    Tag::OctetString(OctetString {
+                        inner: token.to_vec(),
+                        .. Default::default()
+                    }),
+                ]
+            })
+        ],
+    })
 }

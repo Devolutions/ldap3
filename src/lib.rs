@@ -97,6 +97,7 @@ pub mod asn1 {
     pub use lber::write;
     pub use lber::IResult;
 }
+
 mod conn;
 pub mod controls {
     //! Control construction and parsing.
@@ -157,6 +158,7 @@ mod ldap;
 mod protocol;
 pub mod result;
 mod search;
+mod spnego;
 #[cfg(feature = "sync")]
 mod sync;
 mod util;

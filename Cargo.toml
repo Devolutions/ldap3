@@ -30,6 +30,9 @@ maplit = "1.0.2"
 path = "lber"
 version = "0.1.7"
 
+[dependencies.sspi]
+version = "0.1.0"
+
 [[example]]
 name = "bind_sync"
 required-features = ["sync"]

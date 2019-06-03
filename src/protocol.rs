@@ -91,7 +91,17 @@ impl Decoder for LdapCodec {
             IResult::Done(_, id) => id as i32,
             _ => return Err(decoding_error),
         };
-        Ok(Some((msgid, (Tag::StructureTag(protoop), controls))))
+
+        match protoop.id {
+            1 => {
+                // TODO : Parse bind response
+                Ok(Some((msgid, (Tag::StructureTag(protoop), controls))))
+            }
+            _ => {
+                Ok(Some((msgid, (Tag::StructureTag(protoop), controls))))
+            }
+        }
+
     }
 }
 
