@@ -12,6 +12,7 @@ use crate::search::{ResultEntry, Scope, SearchOptions, SearchStream};
 use crate::RequestId;
 
 use tokio::runtime::{self, Runtime};
+use std::sync::Arc;
 
 /// Synchronous connection to an LDAP server.
 ///
@@ -86,6 +87,12 @@ impl LdapConn {
         let rt = &mut self.rt;
         let ldap = &mut self.ldap;
         rt.block_on(async move { ldap.sasl_external_bind().await })
+    }
+
+    pub fn sasl_spnego_bind(&mut self, username: &str, password: &str) -> Result<LdapResult> {
+        //let rt = Arc::get_mut(&mut self.rt).expect("runtime ref");
+        let ldap = &mut self.ldap;
+        self.rt.block_on(async move { ldap.sasl_spnego_bind(username, password).await })
     }
 
     /// See [`Ldap::search()`](struct.Ldap.html#method.search).
