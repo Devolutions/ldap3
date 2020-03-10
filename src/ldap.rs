@@ -310,6 +310,7 @@ pub struct LdapConnSettings {
     no_tls_verify: bool,
     #[cfg(feature = "tls")]
     root_certificates: Vec<Vec<u8>>,
+    ip_address: Option<std::net::IpAddr>,
     resolver: Option<Rc<dyn Fn(&str) -> Box<dyn Future<Item=SocketAddr, Error=io::Error>>>>,
 }
 
@@ -371,6 +372,11 @@ impl LdapConnSettings {
         self
     }
 
+    pub fn set_ip_address(mut self, ip_address: &std::net::IpAddr) -> Self {
+        self.ip_address = Some(ip_address.clone());
+        self
+    }
+
     /// Set a custom resolver for translating a _hostname_&#8239;:&#8239;_port_
     /// string into its numeric representation. As the string is passed from
     /// internal URL-parsing routines, it is guaranteed to be in this format
@@ -427,7 +433,22 @@ pub fn is_starttls(_settings: &LdapConnSettings) -> bool {
     false
 }
 
+fn split_host_and_port(a: &str) -> Option<(&str, u16)> {
+    let mut x = a.splitn(2, ':');
+    let host = x.next()?;
+    let port = x.next()?;
+    let port = port.parse::<u16>().ok()?;
+    Some((host, port))
+}
+
 pub fn resolve_addr(addr: &str, settings: &LdapConnSettings) -> Box<dyn Future<Item=SocketAddr, Error=io::Error>> {
+    if let Some(ref ip_address) = settings.ip_address {
+        if let Some((_host, port)) = split_host_and_port(addr) {
+            let addr = SocketAddr::new(ip_address.clone(), port);
+            return Box::new(future::ok(addr));
+        }
+    }
+
     if let Some(ref resolver) = settings.resolver {
         resolver(addr)
     } else {
