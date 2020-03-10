@@ -110,6 +110,7 @@ pub struct LdapConnSettings {
     no_tls_verify: bool,
     #[cfg(feature = "tls")]
     root_certificates: Vec<Vec<u8>>,
+    ip_address: Option<std::net::IpAddr>,
 }
 
 impl LdapConnSettings {
@@ -170,6 +171,11 @@ impl LdapConnSettings {
     #[cfg(feature = "tls")]
     pub fn add_root_certificate(mut self, root_certificate: &[u8]) -> Self {
         self.root_certificates.push(root_certificate.to_vec());
+        self
+    }
+
+    pub fn set_ip_address(mut self, ip_address: &std::net::IpAddr) -> Self {
+        self.ip_address = Some(ip_address.clone());
         self
     }
 }
@@ -313,11 +319,17 @@ impl LdapConnAsync {
         if let Some(url_port) = url.port() {
             port = url_port;
         }
-        let (_hostname, host_port) = match url.host_str() {
-            Some(h) if h != "" => (h, format!("{}:{}", h, port)),
-            Some(h) if h == "" => ("localhost", format!("localhost:{}", port)),
-            _ => panic!("unexpected None from url.host_str()"),
+
+        let (_hostname, host_port) = if let Some(ip_address) = settings.ip_address.map(|ip| ip.to_string()) {
+            (ip_address.clone(), format!("{}:{}", ip_address, port))
+        } else {
+            match url.host_str() {
+                Some(h) if h != "" => (h.to_string(), format!("{}:{}", h, port)),
+                Some(h) if h == "" => ("localhost".to_string(), format!("localhost:{}", port)),
+                _ => panic!("unexpected None from url.host_str()"),
+            }
         };
+
         let stream = TcpStream::connect(host_port.as_str()).await?;
         let (mut conn, mut ldap) = Self::conn_pair(ConnType::Tcp(stream));
         match scheme {
@@ -361,7 +373,7 @@ impl LdapConnAsync {
                 let parts = conn.stream.into_parts();
                 let tls_stream = if let ConnType::Tcp(stream) = parts.io {
                     TokioTlsConnector::from(connector)
-                        .connect(_hostname, stream)
+                        .connect(&_hostname, stream)
                         .await?
                 } else {
                     panic!("underlying stream not TCP");
@@ -500,3 +512,5 @@ impl LdapConnAsync {
         Ok(self)
     }
 }
+
+
