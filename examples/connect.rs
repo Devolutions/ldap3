@@ -2,6 +2,7 @@ extern crate ldap3;
 
 use std::env;
 use std::error::Error;
+use std::net::{IpAddr,Ipv4Addr};
 
 use ldap3::{LdapConn,LdapConnSettings};
 
@@ -14,6 +15,7 @@ fn main() {
 
 fn connect() -> Result<(), Box<dyn Error>> {
     let mut ldap_server_url: Option<&str> = None;
+    let mut ldap_server_ip: Option<&str> = None;
     let mut ldap_username: Option<&str> = None;
     let mut ldap_password: Option<&str> = None;
     let mut ldap_bind_type: Option<&str> = None;
@@ -42,6 +44,9 @@ fn connect() -> Result<(), Box<dyn Error>> {
                 },
                 "server-url" => {
                     ldap_server_url = Some(value);
+                },
+                "server-ip" => {
+                    ldap_server_ip = Some(value);
                 },
                 "bind-type" => {
                     ldap_bind_type = Some(value);
@@ -73,6 +78,13 @@ fn connect() -> Result<(), Box<dyn Error>> {
     println!("LdapCertificateValidation: {}", ldap_certificate_validation);
 
     let mut ldap_settings = LdapConnSettings::new().set_no_tls_verify(!ldap_certificate_validation);
+
+    if let Some(ldap_server_ip) = ldap_server_ip {
+        if let Ok(ip_address) = ldap_server_ip.parse::<Ipv4Addr>() {
+            let ip_address = IpAddr::V4(ip_address);
+            ldap_settings = ldap_settings.set_ip_address(&ip_address);
+        }
+    }
 
     if let Some(ldap_trusted_root_ca_file) = ldap_trusted_root_ca_file {
         println!("LdapTrustedRootCaFile: {}", ldap_trusted_root_ca_file);
