@@ -34,6 +34,7 @@ use tokio::time;
 use tokio_tls::{TlsConnector as TokioTlsConnector, TlsStream};
 use tokio_util::codec::{Decoder, Framed};
 use url::{self, Url};
+use native_tls::Certificate;
 
 #[derive(Debug)]
 enum ConnType {
@@ -107,6 +108,8 @@ pub struct LdapConnSettings {
     starttls: bool,
     #[cfg(feature = "tls")]
     no_tls_verify: bool,
+    #[cfg(feature = "tls")]
+    root_certificates: Vec<Vec<u8>>,
 }
 
 impl LdapConnSettings {
@@ -125,23 +128,6 @@ impl LdapConnSettings {
         self.conn_timeout = Some(timeout);
         self
     }
-
-// TODO FD
-// =======
-//     /// Do a SASL GSS-SPNEGO bind (SSPI Negotiate module, NTLM or Kerberos)
-//     pub fn sasl_spnego_bind(&self, username: &str, password: &str) -> io::Result<LdapResult> {
-//         Ok(self.core.borrow_mut().run(self.inner.clone().sasl_spnego_bind(username, password))?)
-//     }
-//
-//     /// Use the provided `SearchOptions` with the next Search operation, which can
-//     /// be invoked directly on the result of this method. If this method is used in
-//     /// combination with a non-Search operation, the provided options will be silently
-//     /// discarded when the operation is invoked.
-//     ///
-//     /// The Search operation can be invoked on the result of this method.
-//     pub fn with_search_options(&self, opts: SearchOptions) -> &Self {
-//         self.inner.with_search_options(opts);
-// >>>>>>> 41749c3... ldap3: add support for GSS-SPNEGO bind
 
     #[cfg(feature = "tls")]
     /// Set a custom TLS connector, which enables setting various options
@@ -178,6 +164,12 @@ impl LdapConnSettings {
     /// verification. Defaults to `false`.
     pub fn set_no_tls_verify(mut self, no_tls_verify: bool) -> Self {
         self.no_tls_verify = no_tls_verify;
+        self
+    }
+
+    #[cfg(feature = "tls")]
+    pub fn add_root_certificate(mut self, root_certificate: &[u8]) -> Self {
+        self.root_certificates.push(root_certificate.to_vec());
         self
     }
 }
@@ -339,6 +331,13 @@ impl LdapConnAsync {
                         if settings.no_tls_verify {
                             builder.danger_accept_invalid_certs(true);
                         }
+
+                        for root_certificate in settings.root_certificates {
+                            let certificate = Certificate::from_der(&root_certificate).or_else(|e|
+                                Certificate::from_pem(&root_certificate)).expect("unable to parse root certificate");
+                            builder.add_root_certificate(certificate);
+                        }
+
                         builder.build().expect("connector")
                     }
                 };
