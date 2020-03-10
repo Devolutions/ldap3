@@ -40,6 +40,7 @@ use tokio_rustls::{client::TlsStream, TlsConnector as TokioTlsConnector};
 compile_error!(r#"Only one of "tls-native" and "tls-rustls" may be enabled for TLS support"#);
 use tokio_util::codec::{Decoder, Framed};
 use url::{self, Url};
+use native_tls::Certificate;
 
 #[derive(Debug)]
 enum ConnType {
@@ -131,6 +132,8 @@ pub struct LdapConnSettings {
     starttls: bool,
     #[cfg(any(feature = "tls-native", feature = "tls-rustls"))]
     no_tls_verify: bool,
+    #[cfg(feature = "tls")]
+    root_certificates: Vec<Vec<u8>>,
 }
 
 impl LdapConnSettings {
@@ -194,6 +197,12 @@ impl LdapConnSettings {
     /// verification. Defaults to `false`.
     pub fn set_no_tls_verify(mut self, no_tls_verify: bool) -> Self {
         self.no_tls_verify = no_tls_verify;
+        self
+    }
+
+    #[cfg(feature = "tls")]
+    pub fn add_root_certificate(mut self, root_certificate: &[u8]) -> Self {
+        self.root_certificates.push(root_certificate.to_vec());
         self
     }
 }
@@ -445,6 +454,13 @@ impl LdapConnAsync {
         if settings.no_tls_verify {
             builder.danger_accept_invalid_certs(true);
         }
+
+        for root_certificate in &settings.root_certificates {
+            let certificate = Certificate::from_der(&root_certificate).or_else(|e|
+                Certificate::from_pem(&root_certificate)).expect("unable to parse root certificate");
+            builder.add_root_certificate(certificate);
+        }
+
         builder.build().expect("connector")
     }
 
