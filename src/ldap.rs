@@ -244,8 +244,7 @@ impl Ldap {
         let _sspi_status = spnego_client.authenticate(input.as_slice(), &mut output).unwrap();
         let req = create_spnego_bind_request(output.clone());
 
-        let ldap = self.clone();
-        let (mut result, exop) = self.op_call(LdapOp::Single, req).await?;
+        let mut result = self.op_call(LdapOp::Single, req).await?.0;
 
         let input = result.get_bind_token().unwrap();
         let mut output = Vec::new();
