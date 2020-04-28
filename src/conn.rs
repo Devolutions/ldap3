@@ -333,7 +333,7 @@ impl LdapConnAsync {
                         }
 
                         for root_certificate in settings.root_certificates {
-                            let certificate = Certificate::from_der(&root_certificate).or_else(|e|
+                            let certificate = Certificate::from_der(&root_certificate).or_else(|_|
                                 Certificate::from_pem(&root_certificate)).expect("unable to parse root certificate");
                             builder.add_root_certificate(certificate);
                         }

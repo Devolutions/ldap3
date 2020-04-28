@@ -151,7 +151,7 @@ impl<'a> Consumer<&'a [u8], StructureTag, (), Move> for Parser {
 #[cfg(test)]
 mod test {
     use super::*;
-    use common::{TagClass, TagStructure};
+    use common::{TagClass};
     use nom::IResult;
     use structure::{StructureTag, PL};
 
