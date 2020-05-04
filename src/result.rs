@@ -26,6 +26,7 @@ use lber::IResult;
 use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
 use tokio::time;
+use crate::controls_impl::ControlType::BindResponse;
 
 /// Type alias for the standard `Result` with the fixed `LdapError` error part.
 pub type Result<T> = std::result::Result<T, LdapError>;
