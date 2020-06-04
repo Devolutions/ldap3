@@ -414,7 +414,7 @@ impl LdapConnAsync {
     ) -> Result<TlsStream<TcpStream>> {
         let connector = match settings.connector {
             Some(connector) => connector,
-            None => LdapConnAsync::create_connector(&settings),
+            None => LdapConnAsync::create_connector(&settings)?,
         };
         TokioTlsConnector::from(connector)
             .connect(hostname, stream)
@@ -461,19 +461,19 @@ impl LdapConnAsync {
     }
 
     #[cfg(feature = "tls-native")]
-    fn create_connector(settings: &LdapConnSettings) -> TlsConnector {
+    fn create_connector(settings: &LdapConnSettings) -> Result<TlsConnector> {
         let mut builder = TlsConnector::builder();
         if settings.no_tls_verify {
             builder.danger_accept_invalid_certs(true);
         }
 
         for root_certificate in &settings.root_certificates {
-            let certificate = Certificate::from_der(&root_certificate).or_else(|e|
-                Certificate::from_pem(&root_certificate)).expect("unable to parse root certificate");
+            let certificate = Certificate::from_der(&root_certificate).or_else(|_|
+                Certificate::from_pem(&root_certificate))?;
             builder.add_root_certificate(certificate);
         }
 
-        builder.build().expect("connector")
+        Ok(builder.build().expect("connector"))
     }
 
     fn conn_pair(ctype: ConnType) -> (Self, Ldap) {

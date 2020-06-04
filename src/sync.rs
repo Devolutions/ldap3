@@ -12,7 +12,6 @@ use crate::search::{ResultEntry, Scope, SearchOptions, SearchStream};
 use crate::RequestId;
 
 use tokio::runtime::{self, Runtime};
-use std::sync::Arc;
 
 /// Synchronous connection to an LDAP server.
 ///
