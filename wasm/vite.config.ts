@@ -6,7 +6,6 @@ export default defineConfig({
     build: {
         lib: {
             entry: './pkg/ldap3_wasm.js',
-            // entry: './main.ts',
             name: 'LdapClient',
             formats: ["es"],
         },
@@ -16,10 +15,7 @@ export default defineConfig({
         }
     },
     plugins: [
-        dtsPlugin({ 
-            // rollupTypes:true,
-            // entryRoot: '.'
-        }),
+        dtsPlugin({}),
         wasm()
     ],
 });
