@@ -4,6 +4,7 @@ use wasm_bindgen::{prelude::wasm_bindgen, JsValue};
 pub mod error;
 pub mod ldap_session;
 pub mod schema;
+pub mod search;
 #[cfg(test)]
 mod test;
 
