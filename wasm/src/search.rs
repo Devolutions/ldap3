@@ -8,7 +8,8 @@ use futures_util::sink::SinkExt;
 use futures_util::StreamExt;
 use js_sys::Function;
 use ldap3_proto::{
-    proto::{LdapOp, LdapSearchRequest}, LdapFilter, LdapMsg,
+    proto::{LdapOp, LdapSearchRequest},
+    LdapFilter, LdapMsg,
 };
 
 use wasm_bindgen::prelude::*;
@@ -31,20 +32,25 @@ pub struct LdapSearchResultStream {
 #[allow(clippy::await_holding_refcell_ref)] // browser is single threaded
 impl LdapSearchResultStream {
     /// if error, will call callback with {error: string}
-    pub fn on_message(&mut self, callback: &Function) -> JsResult<()> {
+    /// NOTE:: DO NOT USE LdapSearchResultStream after calling this function
+    pub fn on_message(self, callback: &Function) -> JsResult<()> {
         if !callback.is_function() {
             return Err(to_js_error!("callback is not a function"));
         }
-        let frame_clone = self.frame.clone();
-        let schema = self.schema.clone();
+
+        let LdapSearchResultStream {
+            schema,
+            frame,
+            request_message,
+        } = self;
+
         let callback_clone = callback.clone();
-        let msg = self.request_message.clone();
 
         let future = Box::pin(async move {
-            let res = frame_clone
+            let res = frame
                 .as_ref()
                 .borrow_mut()
-                .send(msg)
+                .send(request_message)
                 .await
                 .map_err(|e| to_js_error!("Unable to send search -> {:?}", e));
 
@@ -55,7 +61,7 @@ impl LdapSearchResultStream {
             }
 
             let error = loop {
-                let response = frame_clone.as_ref().borrow_mut().next().await;
+                let response = frame.as_ref().borrow_mut().next().await;
 
                 if response.is_none() {
                     break Err(JsErrorValue::new("no result present").to_js_value());
@@ -73,6 +79,7 @@ impl LdapSearchResultStream {
                             .attributes
                             .iter()
                             .map(|attr| {
+                                // TODO! should have a input such that check if we fall back to bytes when parsing fails
                                 schema_ref
                                     .to_displayable_attribute(attr)
                                     .map_err(|e| to_js_error!("{:?}", e))

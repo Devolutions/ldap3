@@ -18,9 +18,9 @@ use tracing::debug;
 use wasm_bindgen::prelude::*;
 use ws_stream_wasm::WsStreamIo;
 
-use crate::schema::{DefaultAttributeSyntaxSchema};
-use crate::{to_js_error, JsResult};
+use crate::schema::DefaultAttributeSyntaxSchema;
 use crate::{error::JsErrorValue, search::LdapSearchStreamBuilder};
+use crate::{to_js_error, JsResult};
 
 pub(crate) type LdapFrame = Framed<IoStream<WsStreamIo, Vec<u8>>, LdapCodec>;
 #[wasm_bindgen]
@@ -112,7 +112,9 @@ impl LdapSession {
             parse_ldap_filter_str(&filter).map_err(|e| to_js_error!("Invalid filter : {:?}", e))?;
 
         let builder = LdapSearchStreamBuilder::default()
-            .schema(Rc::new(RefCell::new(DefaultAttributeSyntaxSchema::new())))
+            .schema(Rc::new(RefCell::new(
+                DefaultAttributeSyntaxSchema::default(),
+            )))
             .frame(self.frame.clone())
             .search_base(search_base)
             .filter(filter)

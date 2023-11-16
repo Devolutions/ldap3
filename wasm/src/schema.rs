@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use anyhow::Ok;
 use ldap3_proto::proto::LdapAttribute;
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
@@ -73,12 +74,18 @@ impl TryFrom<i32> for DisplayableAttributesValueTypes {
     }
 }
 
+/// LDAP Bytes->Rust->JS
 pub trait AttributeSyntaxSchema {
     type Error;
     fn to_displayable_attribute(
         &self,
         attribute: &LdapAttribute,
     ) -> Result<DisplayableAttribute, Self::Error>;
+
+    fn convert_to_bytes_attribute(
+        &self,
+        attribute: &LdapAttribute,
+    ) -> Vec<DisplayableAttributesValue>;
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
@@ -117,37 +124,45 @@ impl AttributeSyntaxSchema for DefaultAttributeSyntaxSchema {
     ) -> Result<DisplayableAttribute, Self::Error> {
         let displayable_attribute = match self.hash_map.get(&attribute.atype) {
             Some(attribute_display_type) => {
-                let attribute_value = match attribute_display_type {
+                let attribute_result = match attribute_display_type {
                     DisplayableAttributesValueTypes::String => {
-                        self.convert_to_string_attribute(attribute)?
+                        self.convert_to_string_attribute(attribute)
                     }
                     DisplayableAttributesValueTypes::Integer => {
-                        self.convert_to_integer_attribute(attribute)?
+                        self.convert_to_integer_attribute(attribute)
                     }
                     DisplayableAttributesValueTypes::Boolean => {
-                        self.convert_to_boolean_attribute(attribute)?
+                        self.convert_to_boolean_attribute(attribute)
                     }
                     DisplayableAttributesValueTypes::Date => {
-                        self.convert_to_date_attribute(attribute)?
+                        self.convert_to_date_attribute(attribute)
                     }
                     DisplayableAttributesValueTypes::Bytes => {
-                        self.convert_to_bytes_attribute(attribute)
+                        Ok(self.convert_to_bytes_attribute(attribute))
                     }
                     DisplayableAttributesValueTypes::Enum => {
-                        self.convert_to_u8_attribute(attribute)?
+                        self.convert_to_u8_attribute(attribute)
                     }
                 };
-                DisplayableAttribute {
-                    attribute_name: attribute.atype.clone(),
-                    attribute_value,
-                }
+                attribute_result
             }
-            None => DisplayableAttribute {
-                attribute_name: attribute.atype.clone(),
-                attribute_value: self.convert_to_bytes_attribute(attribute),
-            },
+            None => Err(anyhow::anyhow!("Attribute not found")),
         };
-        Ok(displayable_attribute)
+        Ok(DisplayableAttribute {
+            attribute_name: attribute.atype.clone(),
+            attribute_value: displayable_attribute?,
+        })
+    }
+
+    fn convert_to_bytes_attribute(
+        &self,
+        attribute: &LdapAttribute,
+    ) -> Vec<DisplayableAttributesValue> {
+        attribute
+            .vals
+            .iter()
+            .map(|v| DisplayableAttributesValue::Bytes(v.clone()))
+            .collect()
     }
 }
 
@@ -258,17 +273,6 @@ impl DefaultAttributeSyntaxSchema {
             })
             .collect()
     }
-
-    fn convert_to_bytes_attribute(
-        &self,
-        attribute: &LdapAttribute,
-    ) -> Vec<DisplayableAttributesValue> {
-        attribute
-            .vals
-            .iter()
-            .map(|v| DisplayableAttributesValue::Bytes(v.clone()))
-            .collect()
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -291,3 +295,27 @@ pub struct DisplayableEntry {
     pub dn: String,
     pub attributes: Vec<DisplayableAttribute>,
 }
+
+/*
+
+    [
+        {
+            attribute_name: "cn",
+            type: DisplayableAttributesValueTypes.String,
+            attribute_value: [
+                "test",
+                "test2"
+            ]
+        }
+    ]
+
+*/
+
+pub struct LdapEntry {
+    pub dn: String,
+    pub attributes: Vec<DisplayableAttributesValue>,
+}
+/// JS->Rust->LDAP Bytes
+pub struct Parser;
+
+impl Parser {}
