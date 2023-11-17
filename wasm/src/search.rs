@@ -1,4 +1,3 @@
-use core::panic;
 use std::cell::RefCell;
 use std::collections::HashMap;
 
@@ -14,16 +13,15 @@ use ldap3_proto::{
 
 use wasm_bindgen::prelude::*;
 
-use crate::{call_js_function, to_js_error, JsResult};
-use crate::{error::JsErrorValue, ldap_session::LdapFrame};
 use crate::{
-    ldap_session::JsLdapSearchScope,
-    schema::{AttributeSyntaxSchema, DefaultAttributeSyntaxSchema, DisplayableEntry},
+    call_js_function, call_js_function_serde, schema::to_displayable_entry, to_js_error, JsResult,
 };
+use crate::{error::JsErrorValue, ldap_session::LdapFrame};
+use crate::{ldap_session::JsLdapSearchScope, schema::DefaultAttributeSyntaxSchema};
 
 #[wasm_bindgen]
 pub struct LdapSearchResultStream {
-    schema: Rc<RefCell<DefaultAttributeSyntaxSchema>>,
+    schema: DefaultAttributeSyntaxSchema,
     frame: Rc<RefCell<LdapFrame>>,
     request_message: LdapMsg,
 }
@@ -55,8 +53,7 @@ impl LdapSearchResultStream {
                 .map_err(|e| to_js_error!("Unable to send search -> {:?}", e));
 
             if let Err(e) = res {
-                let error = JsErrorValue::new(e).to_js_value();
-                call_js_function!(callback_clone, error);
+                call_js_function!(callback_clone, JsErrorValue::new(e).to_js_value());
                 return;
             }
 
@@ -72,34 +69,19 @@ impl LdapSearchResultStream {
                 }
                 let response = response.unwrap();
 
-                match &response.op {
+                match response.op {
                     LdapOp::SearchResultEntry(entry) => {
-                        let schema_ref = schema.as_ref().borrow();
-                        let parsed_attrubutes = entry
-                            .attributes
-                            .iter()
-                            .map(|attr| {
-                                // TODO! should have a input such that check if we fall back to bytes when parsing fails
-                                schema_ref
-                                    .to_displayable_attribute(attr)
-                                    .map_err(|e| to_js_error!("{:?}", e))
-                            })
-                            .collect::<Result<Vec<_>, _>>();
-
-                        if let Err(e) = parsed_attrubutes {
-                            break Err(e);
-                        }
-
-                        let parsed_attrubutes = parsed_attrubutes.unwrap();
-                        let displayable_entry = DisplayableEntry {
-                            dn: entry.dn.clone(),
-                            attributes: parsed_attrubutes,
-                        };
-                        match serde_wasm_bindgen::to_value(&displayable_entry) {
-                            Ok(js_mes) => {
-                                call_js_function!(callback_clone, js_mes)
+                        let displayable_entry = to_displayable_entry(&schema, entry);
+                        match displayable_entry {
+                            Ok(js_message) => {
+                                call_js_function_serde!(callback_clone, js_message)
                             }
-                            Err(e) => break Err(to_js_error!("failed to serialize {:?}", e)),
+                            Err(e) => {
+                                call_js_function!(
+                                    callback_clone,
+                                    to_js_error!("failed to convert entry {:?}", e)
+                                )
+                            }
                         }
                     }
                     LdapOp::SearchResultReference(..) => continue,
@@ -123,7 +105,7 @@ impl LdapSearchResultStream {
 
 impl LdapSearchResultStream {
     pub fn new(
-        schema: Rc<RefCell<DefaultAttributeSyntaxSchema>>,
+        schema: DefaultAttributeSyntaxSchema,
         frame: Rc<RefCell<LdapFrame>>,
         msg: LdapMsg,
     ) -> Self {
@@ -151,10 +133,8 @@ impl LdapSearchStreamBuilder {
         } = self;
 
         let new_map: HashMap<String, i32> = serde_wasm_bindgen::from_value(js_shcema)?;
+        let mut schema = schema.ok_or(to_js_error!("Rust Schema Struct not set"))?;
         let keys_used = schema
-            .as_deref()
-            .ok_or(to_js_error!("Rust Schema Struct not set"))?
-            .borrow_mut()
             .add_attribute_display_type(new_map)
             .map_err(|e| to_js_error!("{:?}", e))?;
 
@@ -176,7 +156,7 @@ impl LdapSearchStreamBuilder {
         };
 
         Ok(LdapSearchResultStream::new(
-            schema.unwrap(),
+            schema,
             frame.ok_or(to_js_error!("missing stream"))?,
             msg,
         ))
@@ -186,7 +166,7 @@ impl LdapSearchStreamBuilder {
 #[wasm_bindgen]
 #[derive(Default)]
 pub struct LdapSearchStreamBuilder {
-    schema: Option<Rc<RefCell<DefaultAttributeSyntaxSchema>>>,
+    schema: Option<DefaultAttributeSyntaxSchema>,
     frame: Option<Rc<RefCell<LdapFrame>>>,
     search_base: Option<String>,
     filter: Option<LdapFilter>,
@@ -197,7 +177,7 @@ pub struct LdapSearchStreamBuilder {
 }
 
 impl LdapSearchStreamBuilder {
-    pub fn schema(mut self, schema: Rc<RefCell<DefaultAttributeSyntaxSchema>>) -> Self {
+    pub fn schema(mut self, schema: DefaultAttributeSyntaxSchema) -> Self {
         self.schema = Some(schema);
         self
     }

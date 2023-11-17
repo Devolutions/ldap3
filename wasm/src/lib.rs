@@ -3,19 +3,31 @@ use wasm_bindgen::{prelude::wasm_bindgen, JsValue};
 
 pub mod error;
 pub mod ldap_session;
+pub mod modify;
 pub mod schema;
 pub mod search;
 #[cfg(test)]
 mod test;
+pub mod utils;
 
 pub type JsResult<T> = Result<T, JsValue>;
 
 #[macro_export]
 macro_rules! call_js_function {
-    ($callback:ident, $error:ident) => {
+    ($callback:ident, $value:expr) => {
         $callback
-            .call1(&JsValue::NULL, &$error)
+            .call1(&JsValue::NULL, &$value)
             .expect("Callback invocation failed")
+    };
+}
+
+#[macro_export]
+macro_rules! call_js_function_serde {
+    ($callback:ident, $value:expr) => {
+        match serde_wasm_bindgen::to_value(&$value) {
+            Ok(js_value) => call_js_function!($callback, js_value),
+            Err(error) => call_js_function!($callback, JsErrorValue::new(error).to_js_value()),
+        }
     };
 }
 
