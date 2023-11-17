@@ -1,25 +1,32 @@
 use core::panic;
+
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::fmt::Debug;
 
 use std::rc::Rc;
 
 use async_io_stream::IoStream;
 use futures_util::sink::SinkExt;
 use futures_util::StreamExt;
+
 use ldap3_proto::{
     parse_ldap_filter_str,
-    proto::{LdapAddRequest, LdapBindCred, LdapBindRequest, LdapOp},
+    proto::{LdapAddRequest, LdapBindCred, LdapBindRequest, LdapModify, LdapModifyRequest, LdapOp},
     LdapCodec, LdapMsg, LdapSearchScope,
 };
 
+use serde::{Deserialize, Serialize};
 use tokio_util::codec::Framed;
+
 use tracing::debug;
 use wasm_bindgen::prelude::*;
 use ws_stream_wasm::WsStreamIo;
 
-use crate::schema::DefaultAttributeSyntaxSchema;
-use crate::{error::JsErrorValue, search::LdapSearchStreamBuilder};
+use crate::{error::JsErrorValue, receive_message, search::LdapSearchStreamBuilder, send_message};
+use crate::{
+    modify::DeserializableModify,
+    schema::{DefaultAttributeSyntaxSchema, DisplayableAttribute},
+};
 use crate::{to_js_error, JsResult};
 
 pub(crate) type LdapFrame = Framed<IoStream<WsStreamIo, Vec<u8>>, LdapCodec>;
@@ -87,12 +94,7 @@ impl LdapSession {
             ctrl: vec![],
         };
 
-        self.frame
-            .as_ref()
-            .borrow_mut()
-            .send(msg)
-            .await
-            .map_err(|e| to_js_error!("failed to bind {:?}", e))?;
+        send_message!(self, msg);
 
         if let Some(Ok(msg)) = self.frame.as_ref().borrow_mut().next().await {
             return Ok(serde_wasm_bindgen::to_value(&msg)?);
@@ -112,9 +114,7 @@ impl LdapSession {
             parse_ldap_filter_str(&filter).map_err(|e| to_js_error!("Invalid filter : {:?}", e))?;
 
         let builder = LdapSearchStreamBuilder::default()
-            .schema(Rc::new(RefCell::new(
-                DefaultAttributeSyntaxSchema::default(),
-            )))
+            .schema(DefaultAttributeSyntaxSchema::default())
             .frame(self.frame.clone())
             .search_base(search_base)
             .filter(filter)
@@ -126,12 +126,16 @@ impl LdapSession {
         Ok(builder)
     }
 
-    /// TODO:Attributes cannot be added at this moment, work in progress
     pub async fn add(&mut self, dn: String, attributes: JsValue) -> JsResult<JsValue> {
-        let _map: HashMap<String, Vec<u8>> = serde_wasm_bindgen::from_value(attributes)?;
+        let displayable_attributes: Vec<DisplayableAttribute> =
+            serde_wasm_bindgen::from_value(attributes)?;
+
         let request = LdapAddRequest {
             dn,
-            attributes: vec![],
+            attributes: displayable_attributes
+                .into_iter()
+                .map(|a| a.into())
+                .collect(),
         };
 
         let msg = LdapMsg {
@@ -140,21 +144,8 @@ impl LdapSession {
             ctrl: vec![],
         };
 
-        self.frame
-            .as_ref()
-            .borrow_mut()
-            .send(msg)
-            .await
-            .map_err(|e| to_js_error!("failed to add {:?}", e))?;
-
-        let result = self
-            .frame
-            .as_ref()
-            .borrow_mut()
-            .next()
-            .await
-            .ok_or(to_js_error!("No result"))?
-            .map_err(|e| to_js_error!("{:?}", e))?;
+        send_message!(self, msg);
+        let result = receive_message!(self);
 
         Ok(serde_wasm_bindgen::to_value(&result)?)
     }
@@ -166,12 +157,7 @@ impl LdapSession {
             ctrl: vec![],
         };
 
-        self.frame
-            .as_ref()
-            .borrow_mut()
-            .send(msg)
-            .await
-            .map_err(|e| to_js_error!("failed to delete {:?}", e))?;
+        send_message!(self, msg);
 
         let result = if let Some(msg) = self.frame.as_ref().borrow_mut().next().await {
             match msg {
@@ -227,6 +213,33 @@ impl LdapSession {
 
         Ok(serde_wasm_bindgen::to_value(&result)?)
     }
+
+    pub async fn modify(&mut self, dn: String, modifies: JsValue) -> JsResult<JsValue> {
+        let deserialized_modify: Vec<DeserializableModify> =
+            serde_wasm_bindgen::from_value(modifies)?;
+
+        let op = LdapOp::ModifyRequest(LdapModifyRequest {
+            changes: deserialized_modify
+                .into_iter()
+                .map(|m| {
+                    m.try_into()
+                        .map_err(|e| to_js_error!("Invalid modify : {:?}", e))
+                })
+                .collect::<Result<Vec<LdapModify>, _>>()?,
+            dn,
+        });
+
+        let msg = LdapMsg {
+            msgid: self.next_message_id(),
+            op,
+            ctrl: vec![],
+        };
+
+        send_message!(self, msg);
+        let res = receive_message!(self);
+
+        Ok(serde_wasm_bindgen::to_value(&res)?)
+    }
 }
 
 #[wasm_bindgen]
@@ -244,6 +257,73 @@ impl From<JsLdapSearchScope> for LdapSearchScope {
             JsLdapSearchScope::OneLevel => LdapSearchScope::OneLevel,
             JsLdapSearchScope::Subtree => LdapSearchScope::Subtree,
             JsLdapSearchScope::Children => LdapSearchScope::Children,
+        }
+    }
+}
+
+/*
+{
+    "attribute_name": "cn",
+    "attribute_value": {
+        "type": 0,
+        "value": [
+            "string",
+            "string2"
+        ]
+    }
+}
+*/
+
+#[derive(Clone, Copy, Serialize, Deserialize)]
+#[wasm_bindgen]
+#[repr(u8)]
+pub enum DisplayableAttributesValueType {
+    String = 0,
+    Integer = 1,
+    Boolean = 2,
+    Date = 3,
+    Bytes = 4,
+    Enum = 5,
+}
+
+impl Debug for DisplayableAttributesValueType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::String => write!(f, "String"),
+            Self::Integer => write!(f, "Integer"),
+            Self::Boolean => write!(f, "Boolean"),
+            Self::Date => write!(f, "Date"),
+            Self::Bytes => write!(f, "Bytes"),
+            Self::Enum => write!(f, "Enum"),
+        }
+    }
+}
+
+impl TryFrom<i32> for DisplayableAttributesValueType {
+    type Error = anyhow::Error;
+    fn try_from(value: i32) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(DisplayableAttributesValueType::String),
+            1 => Ok(DisplayableAttributesValueType::Integer),
+            2 => Ok(DisplayableAttributesValueType::Boolean),
+            3 => Ok(DisplayableAttributesValueType::Date),
+            4 => Ok(DisplayableAttributesValueType::Bytes),
+            5 => Ok(DisplayableAttributesValueType::Enum),
+            _ => Err(anyhow::anyhow!("Invalid value")),
+        }
+    }
+}
+
+impl DisplayableAttributesValueType {
+    pub fn into_i32(self) -> i32 {
+        match self {
+            // match to it's number
+            DisplayableAttributesValueType::String => 0,
+            DisplayableAttributesValueType::Integer => 1,
+            DisplayableAttributesValueType::Boolean => 2,
+            DisplayableAttributesValueType::Date => 3,
+            DisplayableAttributesValueType::Bytes => 4,
+            DisplayableAttributesValueType::Enum => 5,
         }
     }
 }
