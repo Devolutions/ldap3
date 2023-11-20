@@ -1,9 +1,9 @@
 use ldap3_proto::LdapPartialAttribute;
-use serde::{Deserialize, Serialize};
-use wasm_bindgen::prelude::wasm_bindgen;
+use serde::{de::Visitor, ser::SerializeStruct, Deserialize, Serialize};
+use wasm_bindgen::{convert::FromWasmAbi, prelude::wasm_bindgen};
 
 // ================================================================================================= Attribute Values
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum DisplayableAttributesValues {
     String(Vec<String>),
     Integer(Vec<i32>),
@@ -22,6 +22,119 @@ impl DisplayableAttributesValues {
             DisplayableAttributesValues::Date(_) => DisplayableAttributesValueType::Date,
             DisplayableAttributesValues::Bytes(_) => DisplayableAttributesValueType::Bytes,
             DisplayableAttributesValues::Enum(_) => DisplayableAttributesValueType::Enum,
+        }
+    }
+}
+impl Serialize for DisplayableAttributesValues {
+    fn serialize<S>(&self, serializer: S) -> std::prelude::v1::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut sv = serializer.serialize_struct("DisplayableAttributesValues", 2)?;
+        sv.serialize_field("type", &self.get_type().into_i32())?;
+
+        match self {
+            DisplayableAttributesValues::String(value) => {
+                sv.serialize_field("value", value)?;
+            }
+            DisplayableAttributesValues::Integer(value) => {
+                sv.serialize_field("value", value)?;
+            }
+            DisplayableAttributesValues::Boolean(value) => {
+                sv.serialize_field("value", value)?;
+            }
+            DisplayableAttributesValues::Date(value) => {
+                sv.serialize_field("value", value)?;
+            }
+            DisplayableAttributesValues::Bytes(value) => {
+                sv.serialize_field("value", value)?;
+            }
+            DisplayableAttributesValues::Enum(value) => {
+                sv.serialize_field("value", value)?;
+            }
+        };
+
+        sv.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for DisplayableAttributesValues {
+    fn deserialize<D>(deserializer: D) -> std::prelude::v1::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserializer.deserialize_map(DisplayableAttributesValuesVisitor)
+    }
+}
+struct DisplayableAttributesValuesVisitor;
+impl<'de> Visitor<'de> for DisplayableAttributesValuesVisitor {
+    type Value = DisplayableAttributesValues;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+        formatter.write_str("DisplayableAttributesValues failed to deserialize")
+    }
+
+    fn visit_map<A>(self, mut map: A) -> std::prelude::v1::Result<Self::Value, A::Error>
+    where
+        A: serde::de::MapAccess<'de>,
+    {
+        let key: String = map.next_key()?.ok_or_else(|| {
+            serde::de::Error::custom(
+                "DisplayableAttributesValues failed to deserialize, the first key is missing",
+            )
+        })?;
+
+        if key != "type" {
+            return Err(serde::de::Error::custom(
+                "DisplayableAttributesValues failed to deserialize, the first key is not type",
+            ));
+        }
+
+        let value: i32 = map.next_value()?;
+
+        let value_type = DisplayableAttributesValueType::try_from(value).map_err(|e| {
+            serde::de::Error::custom(format!(
+                "DisplayableAttributesValues failed to deserialize, the first key is not type {:?}",
+                e
+            ))
+        })?;
+
+        let key: String = map.next_key()?.ok_or_else(|| {
+            serde::de::Error::custom(
+                "DisplayableAttributesValues failed to deserialize, the second key is missing",
+            )
+        })?;
+
+        if key != "value" {
+            return Err(serde::de::Error::custom(
+                "DisplayableAttributesValues failed to deserialize, the second key is not value",
+            ));
+        }
+        match value_type {
+            DisplayableAttributesValueType::String => {
+                let value: Vec<String> = map.next_value()?;
+                Ok(DisplayableAttributesValues::String(value))
+            }
+            DisplayableAttributesValueType::Integer => {
+                let value: Vec<i32> = map.next_value()?;
+                Ok(DisplayableAttributesValues::Integer(value))
+            }
+            DisplayableAttributesValueType::Boolean => {
+                let value: Vec<bool> = map.next_value()?;
+                Ok(DisplayableAttributesValues::Boolean(value))
+            }
+            DisplayableAttributesValueType::Date => {
+                let value: Vec<String> = map.next_value()?;
+                Ok(DisplayableAttributesValues::Date(value))
+            }
+            DisplayableAttributesValueType::Bytes => {
+                let value: Vec<Vec<u8>> = map.next_value()?;
+                Ok(DisplayableAttributesValues::Bytes(value))
+            }
+            DisplayableAttributesValueType::Enum => {
+                let value: Vec<u8> = map.next_value()?;
+                Ok(DisplayableAttributesValues::Enum(value))
+            }
         }
     }
 }
@@ -112,6 +225,7 @@ impl DisplayableAttributesValueType {
 
 // ================================================================================================= Attirbutes
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[wasm_bindgen]
 pub struct DisplayableAttribute {
     pub(crate) attribute_name: String,
     pub(crate) attribute_value: DisplayableAttributesValues,
