@@ -15,15 +15,13 @@ use ldap3_proto::{
     LdapCodec, LdapMsg, LdapSearchScope,
 };
 
-use serde::{Deserialize, Serialize};
 use tokio_util::codec::Framed;
 
-use tracing::debug;
 use wasm_bindgen::prelude::*;
 use ws_stream_wasm::WsStreamIo;
 
 use crate::{
-    error::JsErrorValue, receive_message, schema::displayables::DisplayableAttribute,
+    error::JsErrorValue, receive_message, return_msg, schema::displayables::DisplayableAttribute,
     search::LdapSearchStreamBuilder, send_message,
 };
 use crate::{modify::DeserializableModify, schema::schema::DefaultAttributeSyntaxSchema};
@@ -71,6 +69,7 @@ impl LdapSession {
                 .await
                 .unwrap();
         let io_stream = ws_stream_wasm.into_io();
+
         let framed = Framed::new(io_stream, LdapCodec::default());
         let session = LdapSession {
             frame: Rc::new(RefCell::new(framed)),
@@ -147,7 +146,7 @@ impl LdapSession {
         send_message!(self, msg);
         let result = receive_message!(self);
 
-        Ok(serde_wasm_bindgen::to_value(&result)?)
+        return_msg!(LdapOp::AddResponse, result)
     }
 
     pub async fn delete(&mut self, dn: String) -> JsResult<JsValue> {
@@ -158,22 +157,7 @@ impl LdapSession {
         };
 
         send_message!(self, msg);
-
-        let result = if let Some(msg) = self.frame.as_ref().borrow_mut().next().await {
-            match msg {
-                Ok(res) => {
-                    debug!(" DELETE RESULT =  {:?}", &res);
-                    match res.op {
-                        LdapOp::DelResponse(..) => res,
-                        _ => panic!("Error: {:?}", res),
-                    }
-                }
-                Err(e) => panic!("Error: {:?}", e),
-            }
-        } else {
-            panic!("No result")
-        };
-
+        let result = receive_message!(self);
         Ok(serde_wasm_bindgen::to_value(&result)?)
     }
 
@@ -195,23 +179,10 @@ impl LdapSession {
             ctrl: vec![],
         };
 
-        self.frame
-            .as_ref()
-            .borrow_mut()
-            .send(msg)
-            .await
-            .map_err(|e| to_js_error!("failed to modify {:?}", e))?;
+        send_message!(self, msg);
+        let result = receive_message!(self);
 
-        let result = self
-            .frame
-            .as_ref()
-            .borrow_mut()
-            .next()
-            .await
-            .ok_or(to_js_error!("No result"))?
-            .map_err(|e| to_js_error!("{:?}", e))?;
-
-        Ok(serde_wasm_bindgen::to_value(&result)?)
+        return_msg!(LdapOp::ModifyDNResponse, result)
     }
 
     pub async fn modify(&mut self, dn: String, modifies: JsValue) -> JsResult<JsValue> {
@@ -237,8 +208,29 @@ impl LdapSession {
 
         send_message!(self, msg);
         let res = receive_message!(self);
+        return_msg!(LdapOp::ModifyResponse, res)
+    }
 
-        Ok(serde_wasm_bindgen::to_value(&res)?)
+    pub async fn compare(
+        &mut self,
+        dn: String,
+        attribute: String,
+        value: String,
+    ) -> JsResult<JsValue> {
+        let msg = LdapMsg {
+            msgid: self.next_message_id(),
+            op: LdapOp::CompareRequest(ldap3_proto::proto::LdapCompareRequest {
+                dn,
+                atype: attribute,
+                val: value.as_bytes().to_vec(),
+            }),
+            ctrl: vec![],
+        };
+
+        send_message!(self, msg);
+        let res = receive_message!(self);
+
+        return_msg!(LdapOp::CompareResult, res)
     }
 }
 
@@ -260,16 +252,3 @@ impl From<JsLdapSearchScope> for LdapSearchScope {
         }
     }
 }
-
-/*
-{
-    "attribute_name": "cn",
-    "attribute_value": {
-        "type": 0,
-        "value": [
-            "string",
-            "string2"
-        ]
-    }
-}
-*/

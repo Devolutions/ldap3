@@ -50,7 +50,7 @@ macro_rules! send_message {
             .borrow_mut()
             .send($msg)
             .await
-            .map_err(|e| to_js_error!("failed to send message {:?}", e))?
+            .map_err(|e| to_js_error!("failed to send message {:?}", e))?;
     };
 }
 
@@ -65,5 +65,15 @@ macro_rules! receive_message {
             .await
             .ok_or(to_js_error!(" no result "))?
             .map_err(|e| to_js_error!("{:?}", e))?
+    };
+}
+
+#[macro_export]
+macro_rules! return_msg {
+    ($enum:path,$res:expr) => {
+        match $res.op {
+            $enum(_) => Ok(serde_wasm_bindgen::to_value(&$res)?),
+            _ => Err(to_js_error!("Invalid response")),
+        }
     };
 }
