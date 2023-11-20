@@ -2,8 +2,9 @@ use anyhow::Ok;
 use ldap3_proto::proto::{LdapModify, LdapModifyType};
 use serde::{Deserialize, Serialize};
 
-use crate::schema::DisplayableAttribute;
 use wasm_bindgen::prelude::wasm_bindgen;
+
+use crate::schema::displayables::DisplayableAttribute;
 
 #[wasm_bindgen]
 pub enum ModifyOpeartion {
