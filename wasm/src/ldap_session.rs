@@ -22,11 +22,11 @@ use tracing::debug;
 use wasm_bindgen::prelude::*;
 use ws_stream_wasm::WsStreamIo;
 
-use crate::{error::JsErrorValue, receive_message, search::LdapSearchStreamBuilder, send_message};
 use crate::{
-    modify::DeserializableModify,
-    schema::{DefaultAttributeSyntaxSchema, DisplayableAttribute},
+    error::JsErrorValue, receive_message, schema::displayables::DisplayableAttribute,
+    search::LdapSearchStreamBuilder, send_message,
 };
+use crate::{modify::DeserializableModify, schema::schema::DefaultAttributeSyntaxSchema};
 use crate::{to_js_error, JsResult};
 
 pub(crate) type LdapFrame = Framed<IoStream<WsStreamIo, Vec<u8>>, LdapCodec>;
@@ -273,57 +273,3 @@ impl From<JsLdapSearchScope> for LdapSearchScope {
     }
 }
 */
-
-#[derive(Clone, Copy, Serialize, Deserialize)]
-#[wasm_bindgen]
-#[repr(u8)]
-pub enum DisplayableAttributesValueType {
-    String = 0,
-    Integer = 1,
-    Boolean = 2,
-    Date = 3,
-    Bytes = 4,
-    Enum = 5,
-}
-
-impl Debug for DisplayableAttributesValueType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::String => write!(f, "String"),
-            Self::Integer => write!(f, "Integer"),
-            Self::Boolean => write!(f, "Boolean"),
-            Self::Date => write!(f, "Date"),
-            Self::Bytes => write!(f, "Bytes"),
-            Self::Enum => write!(f, "Enum"),
-        }
-    }
-}
-
-impl TryFrom<i32> for DisplayableAttributesValueType {
-    type Error = anyhow::Error;
-    fn try_from(value: i32) -> Result<Self, Self::Error> {
-        match value {
-            0 => Ok(DisplayableAttributesValueType::String),
-            1 => Ok(DisplayableAttributesValueType::Integer),
-            2 => Ok(DisplayableAttributesValueType::Boolean),
-            3 => Ok(DisplayableAttributesValueType::Date),
-            4 => Ok(DisplayableAttributesValueType::Bytes),
-            5 => Ok(DisplayableAttributesValueType::Enum),
-            _ => Err(anyhow::anyhow!("Invalid value")),
-        }
-    }
-}
-
-impl DisplayableAttributesValueType {
-    pub fn into_i32(self) -> i32 {
-        match self {
-            // match to it's number
-            DisplayableAttributesValueType::String => 0,
-            DisplayableAttributesValueType::Integer => 1,
-            DisplayableAttributesValueType::Boolean => 2,
-            DisplayableAttributesValueType::Date => 3,
-            DisplayableAttributesValueType::Bytes => 4,
-            DisplayableAttributesValueType::Enum => 5,
-        }
-    }
-}

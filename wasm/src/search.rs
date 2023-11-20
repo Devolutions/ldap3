@@ -14,10 +14,11 @@ use ldap3_proto::{
 use wasm_bindgen::prelude::*;
 
 use crate::{
-    call_js_function, call_js_function_serde, schema::to_displayable_entry, to_js_error, JsResult,
+    call_js_function, call_js_function_serde, schema::schema::to_displayable_entry, to_js_error,
+    JsResult,
 };
 use crate::{error::JsErrorValue, ldap_session::LdapFrame};
-use crate::{ldap_session::JsLdapSearchScope, schema::DefaultAttributeSyntaxSchema};
+use crate::{ldap_session::JsLdapSearchScope, schema::schema::DefaultAttributeSyntaxSchema};
 
 #[wasm_bindgen]
 pub struct LdapSearchResultStream {
