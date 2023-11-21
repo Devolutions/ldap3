@@ -5,6 +5,7 @@ use anyhow::Result;
 use ldap3_proto::{proto::LdapAttribute, LdapPartialAttribute, LdapSearchResultEntry};
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
+use tsify::Tsify;
 
 use super::displayables::{
     DisplayableAttribute, DisplayableAttributesValueType, DisplayableAttributesValues,
@@ -42,17 +43,6 @@ pub enum ADAttributeSyntax {
     StringUTCTime,
 }
 
-/*
-    {
-        type: DisplayableAttributesValueTypes.String,
-        value:[
-            "string",
-            "string2"
-        ]
-    }
-
-*/
-
 /// LDAP Bytes->Rust->JS
 pub trait AttributeSyntaxSchema {
     type Error;
@@ -76,19 +66,37 @@ impl DefaultAttributeSyntaxSchema {
         }
     }
 
-    pub fn add_attribute_display_type(
-        &mut self,
-        new_map: HashMap<String, i32>,
-    ) -> anyhow::Result<Vec<String>> {
-        let mut keys_used = Vec::new();
-        for (key, value) in new_map {
-            let display_value = DisplayableAttributesValueType::try_from(value)?;
-            self.hash_map.insert(key.clone(), display_value);
-            keys_used.push(key);
+    pub fn from_vector_scheme(vector_scheme: VectorScheme) -> Self {
+        let VectorScheme(scheme) = vector_scheme;
+        let mut hash_map = HashMap::new();
+        for SingleScheme { atype, value } in scheme {
+            hash_map.insert(atype, value);
         }
-        Ok(keys_used)
+        Self { hash_map }
+    }
+
+    pub fn extend_from_vector_scheme(&mut self, vector_scheme: VectorScheme) {
+        let VectorScheme(scheme) = vector_scheme;
+        for SingleScheme { atype, value } in scheme {
+            self.hash_map.insert(atype, value);
+        }
+    }
+
+    pub fn get_keys(&self) -> Vec<String> {
+        self.hash_map.keys().cloned().collect()
     }
 }
+
+#[derive(Debug, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
+pub struct SingleScheme {
+    atype: String,
+    value: DisplayableAttributesValueType,
+}
+
+#[derive(Debug, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
+pub struct VectorScheme(pub Vec<SingleScheme>);
 
 impl AttributeSyntaxSchema for DefaultAttributeSyntaxSchema {
     type Error = anyhow::Error;

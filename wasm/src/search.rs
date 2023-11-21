@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
 use futures_util::sink::SinkExt;
 use futures_util::StreamExt;
@@ -12,7 +12,11 @@ use tokio::sync::Mutex;
 use wasm_bindgen::prelude::*;
 
 use crate::{
-    call_js_function, call_js_function_serde, schema::attribute_schema::to_displayable_entry,
+    call_js_function, call_js_function_serde,
+    schema::{
+        attribute_schema::{to_displayable_entry, VectorScheme},
+        displayables::{DisplayableSearchMessage, DisplayableSearchOp},
+    },
     to_js_error, JsResult,
 };
 use crate::{error::JsErrorValue, ldap_session::LdapFrame};
@@ -28,7 +32,6 @@ pub struct LdapSearchResultStream {
 }
 
 #[wasm_bindgen]
-#[allow(clippy::await_holding_refcell_ref)] // browser is single threaded
 impl LdapSearchResultStream {
     /// if error, will call callback with {error: string}
     /// NOTE:: DO NOT USE LdapSearchResultStream after calling this function
@@ -68,13 +71,18 @@ impl LdapSearchResultStream {
                     break Err(JsErrorValue::new("error in response").to_js_value());
                 }
                 let response = response.unwrap();
-
-                match response.op {
+                let LdapMsg { op, ctrl, msgid } = response;
+                match op {
                     LdapOp::SearchResultEntry(entry) => {
                         let displayable_entry = to_displayable_entry(&schema, entry);
                         match displayable_entry {
-                            Ok(js_message) => {
-                                call_js_function_serde!(callback_clone, js_message)
+                            Ok(entry) => {
+                                let message = DisplayableSearchMessage {
+                                    msg_id: msgid,
+                                    op: DisplayableSearchOp::Entry(entry),
+                                    ctrl: ctrl.into(),
+                                };
+                                call_js_function_serde!(callback_clone, message)
                             }
                             Err(e) => {
                                 call_js_function!(
@@ -87,10 +95,9 @@ impl LdapSearchResultStream {
                     LdapOp::SearchResultReference(..) => continue,
                     LdapOp::SearchResultDone(..) => break Ok(()),
                     _ => {
-                        break Err(
-                            JsErrorValue::new_with_message("unexpected response", response)
-                                .to_js_value(),
-                        );
+                        break Err(to_js_error!(
+                            "Invalid response type, either search is rejected or the lock on websocket has failed"
+                        ));
                     }
                 };
             };
@@ -119,8 +126,10 @@ impl LdapSearchResultStream {
 
 #[wasm_bindgen]
 impl LdapSearchStreamBuilder {
-    /// schema is of type  { [key: string]: DisplayableAttributesValueTypes }
-    pub fn with_attribute_schema(self, js_shcema: JsValue) -> JsResult<LdapSearchResultStream> {
+    pub fn with_attribute_schema(
+        self,
+        js_shcema: VectorScheme,
+    ) -> JsResult<LdapSearchResultStream> {
         let LdapSearchStreamBuilder {
             schema,
             frame,
@@ -132,17 +141,14 @@ impl LdapSearchStreamBuilder {
             message_id,
         } = self;
 
-        let new_map: HashMap<String, i32> = serde_wasm_bindgen::from_value(js_shcema)?;
-        let mut schema = schema.ok_or(to_js_error!("Rust Schema Struct not set"))?;
-        let keys_used = schema
-            .add_attribute_display_type(new_map)
-            .map_err(|e| to_js_error!("{:?}", e))?;
+        let mut schema = schema.unwrap_or_default();
+        schema.extend_from_vector_scheme(js_shcema);
 
         let request = LdapSearchRequest {
             base: search_base.ok_or(to_js_error!("Search base not set"))?,
             filter: filter.ok_or(to_js_error!("Filter not set"))?,
             scope: scope.ok_or(to_js_error!("Scope not set"))?.into(),
-            attrs: keys_used,
+            attrs: schema.get_keys(),
             aliases: ldap3_proto::proto::LdapDerefAliases::Never,
             sizelimit: size_limit.unwrap_or(1000),
             timelimit: time_limit.unwrap_or(10),

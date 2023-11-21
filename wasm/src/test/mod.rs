@@ -1,6 +1,5 @@
 use wasm_bindgen_test::*;
 
-
 pub mod serialization;
 wasm_bindgen_test_configure!(run_in_browser);
 
@@ -25,6 +24,6 @@ async fn test_derialize_modify() {
     )
     .expect("failed to parse json");
 
-    let _rust_modify: crate::modify::DeserializableModify =
+    let _rust_modify: crate::modify::DisplayableModify =
         serde_wasm_bindgen::from_value(js_modify).expect("failed to deserialize modify");
 }
