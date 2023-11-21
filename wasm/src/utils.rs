@@ -22,3 +22,12 @@ macro_rules! return_msg_if_type_matches {
         }
     };
 }
+
+#[macro_export]
+macro_rules! replace_with_new_vec {
+    ($vec:expr) => {{
+        let mut new_vec = vec![];
+        std::mem::swap(&mut new_vec, $vec);
+        new_vec
+    }};
+}

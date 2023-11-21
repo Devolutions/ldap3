@@ -18,8 +18,8 @@ use wasm_bindgen::prelude::*;
 use ws_stream_wasm::WsStreamIo;
 
 use crate::{
-    error::JsErrorValue, return_msg_if_type_matches, schema::displayables::DisplayableAttribute,
-    search::LdapSearchStreamBuilder, send_message,
+    error::JsErrorValue, replace_with_new_vec, return_msg_if_type_matches,
+    schema::displayables::DisplayableAttribute, search::LdapSearchStreamBuilder, send_message,
 };
 use crate::{modify::DeserializableModify, schema::attribute_schema::DefaultAttributeSyntaxSchema};
 use crate::{to_js_error, JsResult};
@@ -29,6 +29,7 @@ pub(crate) type LdapFrame = Framed<IoStream<WsStreamIo, Vec<u8>>, LdapCodec>;
 pub struct LdapSession {
     frame: Arc<Mutex<LdapFrame>>,
     message_id: i32,
+    control: Vec<ldap3_proto::proto::LdapControl>,
     _parameters: LdapSessionParameters,
 }
 
@@ -69,16 +70,24 @@ impl LdapSession {
         let (_ws_meta, ws_stream_wasm) =
             ws_stream_wasm::WsMeta::connect(&params.server_address_ws_proxy, None)
                 .await
-                .unwrap();
+                .map_err(|e| to_js_error!("Failed to connect to server : {:?}", e))?;
         let io_stream = ws_stream_wasm.into_io();
 
         let framed = Framed::new(io_stream, LdapCodec::default());
         let session = LdapSession {
             frame: Arc::new(Mutex::new(framed)),
             message_id: 0,
+            control: vec![],
             _parameters: params,
         };
         Ok(session)
+    }
+
+    pub fn add_control_for_next_request(&mut self, control: JsValue) -> JsResult<()> {
+        let control: Vec<ldap3_proto::proto::LdapControl> =
+            serde_wasm_bindgen::from_value(control)?;
+        self.control.extend(control);
+        Ok(())
     }
 
     pub async fn bind(
@@ -92,17 +101,19 @@ impl LdapSession {
                 dn: distinguished_name,
                 cred: LdapBindCred::Simple(password),
             }),
-            ctrl: vec![],
+            ctrl: replace_with_new_vec!(&mut self.control),
         };
 
-        // send_message!(self, msg);
-        // self.frame.lo.unwrap().send(msg).await.unwrap();
-        self.frame.lock().await.send(msg).await.unwrap();
-
-        if let Some(Ok(msg)) = self.frame.lock().await.next().await {
-            return Ok(serde_wasm_bindgen::to_value(&msg)?);
+        let res = send_message!(self, msg);
+        match &res.op {
+            LdapOp::BindResponse(bind_response) => match &bind_response.res.code {
+                ldap3_proto::proto::LdapResultCode::Success => {
+                    Ok(serde_wasm_bindgen::to_value(&res)?)
+                }
+                _ => Err(serde_wasm_bindgen::to_value(&res)?),
+            },
+            _ => return Err(to_js_error!("Invalid response")),
         }
-        Err(to_js_error!("Failed to bind"))
     }
 
     pub fn search(
@@ -144,7 +155,7 @@ impl LdapSession {
         let msg = LdapMsg {
             msgid: self.next_message_id(),
             op: LdapOp::AddRequest(request),
-            ctrl: vec![],
+            ctrl: replace_with_new_vec!(&mut self.control),
         };
 
         let res = send_message!(self, msg);
@@ -156,7 +167,7 @@ impl LdapSession {
         let msg = LdapMsg {
             msgid: self.next_message_id(),
             op: LdapOp::DelRequest(dn),
-            ctrl: vec![],
+            ctrl: replace_with_new_vec!(&mut self.control),
         };
 
         let res = send_message!(self, msg);
@@ -179,7 +190,7 @@ impl LdapSession {
                 deleteoldrdn: delete_old_rdn,
                 new_superior,
             }),
-            ctrl: vec![],
+            ctrl: replace_with_new_vec!(&mut self.control),
         };
 
         let result = send_message!(self, msg);
@@ -205,7 +216,7 @@ impl LdapSession {
         let msg = LdapMsg {
             msgid: self.next_message_id(),
             op,
-            ctrl: vec![],
+            ctrl: replace_with_new_vec!(&mut self.control),
         };
 
         let result = send_message!(self, msg);
@@ -225,7 +236,7 @@ impl LdapSession {
                 atype: attribute,
                 val: value.as_bytes().to_vec(),
             }),
-            ctrl: vec![],
+            ctrl: replace_with_new_vec!(&mut self.control),
         };
 
         let result = send_message!(self, msg);
