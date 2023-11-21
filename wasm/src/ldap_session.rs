@@ -18,10 +18,14 @@ use wasm_bindgen::prelude::*;
 use ws_stream_wasm::WsStreamIo;
 
 use crate::{
-    error::JsErrorValue, replace_with_new_vec, return_msg_if_type_matches,
-    schema::displayables::DisplayableAttribute, search::LdapSearchStreamBuilder, send_message,
+    error::JsErrorValue,
+    modify::LdapModifies,
+    replace_with_new_vec, return_msg_if_type_matches,
+    schema::displayables::{DisplayableAttributes},
+    search::LdapSearchStreamBuilder,
+    send_message,
 };
-use crate::{modify::DeserializableModify, schema::attribute_schema::DefaultAttributeSyntaxSchema};
+use crate::{modify::DisplayableModify, schema::attribute_schema::DefaultAttributeSyntaxSchema};
 use crate::{to_js_error, JsResult};
 
 pub(crate) type LdapFrame = Framed<IoStream<WsStreamIo, Vec<u8>>, LdapCodec>;
@@ -112,7 +116,7 @@ impl LdapSession {
                 }
                 _ => Err(serde_wasm_bindgen::to_value(&res)?),
             },
-            _ => return Err(to_js_error!("Invalid response")),
+            _ => Err(to_js_error!("Invalid response")),
         }
     }
 
@@ -140,16 +144,14 @@ impl LdapSession {
         Ok(builder)
     }
 
-    pub async fn add(&mut self, dn: String, attributes: JsValue) -> JsResult<JsValue> {
-        let displayable_attributes: Vec<DisplayableAttribute> =
-            serde_wasm_bindgen::from_value(attributes)?;
-
+    pub async fn add(
+        &mut self,
+        dn: String,
+        attributes: DisplayableAttributes,
+    ) -> JsResult<JsValue> {
         let request = LdapAddRequest {
             dn,
-            attributes: displayable_attributes
-                .into_iter()
-                .map(|a| a.into())
-                .collect(),
+            attributes: attributes.into(),
         };
 
         let msg = LdapMsg {
@@ -198,9 +200,10 @@ impl LdapSession {
         return_msg_if_type_matches!(LdapOp::ModifyDNResponse, result)
     }
 
-    pub async fn modify(&mut self, dn: String, modifies: JsValue) -> JsResult<JsValue> {
-        let deserialized_modify: Vec<DeserializableModify> =
-            serde_wasm_bindgen::from_value(modifies)?;
+    /// modify is of type LdapModify[]
+    pub async fn modify(&mut self, dn: String, modifies: LdapModifies) -> JsResult<JsValue> {
+        // let deserialized_modify: Vec<DisplayableModify> = serde_wasm_bindgen::from_value(modifies)?;
+        let deserialized_modify: Vec<DisplayableModify> = modifies.into();
 
         let op = LdapOp::ModifyRequest(LdapModifyRequest {
             changes: deserialized_modify
