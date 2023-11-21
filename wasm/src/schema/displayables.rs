@@ -145,7 +145,7 @@ impl From<DisplayableEntry> for LdapSearchResultEntry {
 #[serde(rename_all = "snake_case")]
 #[tsify(into_wasm_abi, from_wasm_abi)]
 pub struct DisplayableSearchMessage {
-    pub(crate) msg_id: i32,
+    pub(crate) msgid: i32,
     pub(crate) op: DisplayableSearchOp,
     pub(crate) ctrl: LdapControlArray,
 }
@@ -172,11 +172,17 @@ impl From<Vec<LdapControl>> for LdapControlArray {
 
 impl From<DisplayableSearchMessage> for LdapMsg {
     fn from(val: DisplayableSearchMessage) -> Self {
-        let DisplayableSearchMessage { msg_id, op, ctrl } = val;
+        let DisplayableSearchMessage {
+            msgid: msg_id,
+            op,
+            ctrl,
+        } = val;
         let search_op = match op {
-            DisplayableSearchOp::Entry(ent) => LdapOp::SearchResultEntry(ent.into()),
-            DisplayableSearchOp::Done(res) => LdapOp::SearchResultDone(res),
-            DisplayableSearchOp::Reference(reference) => LdapOp::SearchResultReference(reference),
+            DisplayableSearchOp::SearchEntry(ent) => LdapOp::SearchResultEntry(ent.into()),
+            DisplayableSearchOp::SearchDone(res) => LdapOp::SearchResultDone(res),
+            DisplayableSearchOp::SearchReference(reference) => {
+                LdapOp::SearchResultReference(reference)
+            }
         };
         LdapMsg {
             msgid: msg_id,
@@ -188,10 +194,9 @@ impl From<DisplayableSearchMessage> for LdapMsg {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Tsify)]
 #[serde(rename_all = "snake_case")]
-#[serde(tag = "type", content = "value")]
 #[tsify(into_wasm_abi, from_wasm_abi)]
 pub(crate) enum DisplayableSearchOp {
-    Entry(DisplayableEntry),
-    Done(LdapResult),
-    Reference(LdapSearchResultReference),
+    SearchEntry(DisplayableEntry),
+    SearchDone(LdapResult),
+    SearchReference(LdapSearchResultReference),
 }
