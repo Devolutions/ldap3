@@ -1,9 +1,5 @@
 use core::panic;
-
-use std::cell::RefCell;
-use std::fmt::Debug;
-
-use std::rc::Rc;
+use std::sync::Arc;
 
 use async_io_stream::IoStream;
 use futures_util::sink::SinkExt;
@@ -15,22 +11,23 @@ use ldap3_proto::{
     LdapCodec, LdapMsg, LdapSearchScope,
 };
 
+use tokio::sync::Mutex;
 use tokio_util::codec::Framed;
 
 use wasm_bindgen::prelude::*;
 use ws_stream_wasm::WsStreamIo;
 
 use crate::{
-    error::JsErrorValue, receive_message, return_msg, schema::displayables::DisplayableAttribute,
+    error::JsErrorValue, return_msg_if_type_matches, schema::displayables::DisplayableAttribute,
     search::LdapSearchStreamBuilder, send_message,
 };
-use crate::{modify::DeserializableModify, schema::schema::DefaultAttributeSyntaxSchema};
+use crate::{modify::DeserializableModify, schema::attribute_schema::DefaultAttributeSyntaxSchema};
 use crate::{to_js_error, JsResult};
 
 pub(crate) type LdapFrame = Framed<IoStream<WsStreamIo, Vec<u8>>, LdapCodec>;
 #[wasm_bindgen]
 pub struct LdapSession {
-    frame: Rc<RefCell<LdapFrame>>,
+    frame: Arc<Mutex<LdapFrame>>,
     message_id: i32,
     _parameters: LdapSessionParameters,
 }
@@ -60,8 +57,13 @@ impl LdapSession {
     }
 }
 
+/*
+!Important: currently, in order to remain the sequence of messages to be recevied in the same order as they were sent,
+            we lock the frame while sending a message and receiving the response. This is not ideal, but it works for now.
+            in the future, we should have some machanism to ensure that the messages are received in the same order as they were sent
+            as well as to avoid locking the frame while waiting for a response.
+*/
 #[wasm_bindgen]
-#[allow(clippy::await_holding_refcell_ref)]
 impl LdapSession {
     pub async fn connect(params: LdapSessionParameters) -> JsResult<LdapSession> {
         let (_ws_meta, ws_stream_wasm) =
@@ -72,7 +74,7 @@ impl LdapSession {
 
         let framed = Framed::new(io_stream, LdapCodec::default());
         let session = LdapSession {
-            frame: Rc::new(RefCell::new(framed)),
+            frame: Arc::new(Mutex::new(framed)),
             message_id: 0,
             _parameters: params,
         };
@@ -93,9 +95,11 @@ impl LdapSession {
             ctrl: vec![],
         };
 
-        send_message!(self, msg);
+        // send_message!(self, msg);
+        // self.frame.lo.unwrap().send(msg).await.unwrap();
+        self.frame.lock().await.send(msg).await.unwrap();
 
-        if let Some(Ok(msg)) = self.frame.as_ref().borrow_mut().next().await {
+        if let Some(Ok(msg)) = self.frame.lock().await.next().await {
             return Ok(serde_wasm_bindgen::to_value(&msg)?);
         }
         Err(to_js_error!("Failed to bind"))
@@ -143,10 +147,9 @@ impl LdapSession {
             ctrl: vec![],
         };
 
-        send_message!(self, msg);
-        let result = receive_message!(self);
+        let res = send_message!(self, msg);
 
-        return_msg!(LdapOp::AddResponse, result)
+        return_msg_if_type_matches!(LdapOp::AddResponse, res)
     }
 
     pub async fn delete(&mut self, dn: String) -> JsResult<JsValue> {
@@ -156,9 +159,9 @@ impl LdapSession {
             ctrl: vec![],
         };
 
-        send_message!(self, msg);
-        let result = receive_message!(self);
-        Ok(serde_wasm_bindgen::to_value(&result)?)
+        let res = send_message!(self, msg);
+
+        return_msg_if_type_matches!(LdapOp::DelResponse, res)
     }
 
     pub async fn modify_dn(
@@ -179,10 +182,9 @@ impl LdapSession {
             ctrl: vec![],
         };
 
-        send_message!(self, msg);
-        let result = receive_message!(self);
+        let result = send_message!(self, msg);
 
-        return_msg!(LdapOp::ModifyDNResponse, result)
+        return_msg_if_type_matches!(LdapOp::ModifyDNResponse, result)
     }
 
     pub async fn modify(&mut self, dn: String, modifies: JsValue) -> JsResult<JsValue> {
@@ -206,9 +208,8 @@ impl LdapSession {
             ctrl: vec![],
         };
 
-        send_message!(self, msg);
-        let res = receive_message!(self);
-        return_msg!(LdapOp::ModifyResponse, res)
+        let result = send_message!(self, msg);
+        return_msg_if_type_matches!(LdapOp::ModifyResponse, result)
     }
 
     pub async fn compare(
@@ -227,10 +228,8 @@ impl LdapSession {
             ctrl: vec![],
         };
 
-        send_message!(self, msg);
-        let res = receive_message!(self);
-
-        return_msg!(LdapOp::CompareResult, res)
+        let result = send_message!(self, msg);
+        return_msg_if_type_matches!(LdapOp::CompareResult, result)
     }
 }
 

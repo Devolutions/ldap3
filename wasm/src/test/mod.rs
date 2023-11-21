@@ -1,6 +1,6 @@
 use wasm_bindgen_test::*;
 
-use crate::ldap_session::{LdapSession, LdapSessionParameters};
+
 pub mod serialization;
 wasm_bindgen_test_configure!(run_in_browser);
 
