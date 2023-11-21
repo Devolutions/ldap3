@@ -78,8 +78,8 @@ impl LdapSearchResultStream {
                         match displayable_entry {
                             Ok(entry) => {
                                 let message = DisplayableSearchMessage {
-                                    msg_id: msgid,
-                                    op: DisplayableSearchOp::Entry(entry),
+                                    msgid: msgid,
+                                    op: DisplayableSearchOp::SearchEntry(entry),
                                     ctrl: ctrl.into(),
                                 };
                                 call_js_function_serde!(callback_clone, message)
