@@ -1,6 +1,6 @@
 use ldap3_proto::LdapPartialAttribute;
 use serde::{de::Visitor, ser::SerializeStruct, Deserialize, Serialize};
-use wasm_bindgen::{convert::FromWasmAbi, prelude::wasm_bindgen};
+use wasm_bindgen::{prelude::wasm_bindgen};
 
 // ================================================================================================= Attribute Values
 #[derive(Debug, Clone, PartialEq)]

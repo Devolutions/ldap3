@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use anyhow::Result;
 
 use ldap3_proto::{proto::LdapAttribute, LdapPartialAttribute, LdapSearchResultEntry};
-use serde::{de::Visitor, ser::SerializeStruct, Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 use tracing::instrument;
 
 use super::displayables::{

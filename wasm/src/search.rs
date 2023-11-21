@@ -1,7 +1,4 @@
-use std::cell::RefCell;
-use std::collections::HashMap;
-
-use std::rc::Rc;
+use std::{collections::HashMap, sync::Arc};
 
 use futures_util::sink::SinkExt;
 use futures_util::StreamExt;
@@ -11,19 +8,22 @@ use ldap3_proto::{
     LdapFilter, LdapMsg,
 };
 
+use tokio::sync::Mutex;
 use wasm_bindgen::prelude::*;
 
 use crate::{
-    call_js_function, call_js_function_serde, schema::schema::to_displayable_entry, to_js_error,
-    JsResult,
+    call_js_function, call_js_function_serde, schema::attribute_schema::to_displayable_entry,
+    to_js_error, JsResult,
 };
 use crate::{error::JsErrorValue, ldap_session::LdapFrame};
-use crate::{ldap_session::JsLdapSearchScope, schema::schema::DefaultAttributeSyntaxSchema};
+use crate::{
+    ldap_session::JsLdapSearchScope, schema::attribute_schema::DefaultAttributeSyntaxSchema,
+};
 
 #[wasm_bindgen]
 pub struct LdapSearchResultStream {
     schema: DefaultAttributeSyntaxSchema,
-    frame: Rc<RefCell<LdapFrame>>,
+    frame: Arc<Mutex<LdapFrame>>,
     request_message: LdapMsg,
 }
 
@@ -46,9 +46,8 @@ impl LdapSearchResultStream {
         let callback_clone = callback.clone();
 
         let future = Box::pin(async move {
-            let res = frame
-                .as_ref()
-                .borrow_mut()
+            let mut locked_frame = frame.lock().await;
+            let res = locked_frame
                 .send(request_message)
                 .await
                 .map_err(|e| to_js_error!("Unable to send search -> {:?}", e));
@@ -59,7 +58,7 @@ impl LdapSearchResultStream {
             }
 
             let error = loop {
-                let response = frame.as_ref().borrow_mut().next().await;
+                let response = locked_frame.next().await;
 
                 if response.is_none() {
                     break Err(JsErrorValue::new("no result present").to_js_value());
@@ -107,7 +106,7 @@ impl LdapSearchResultStream {
 impl LdapSearchResultStream {
     pub fn new(
         schema: DefaultAttributeSyntaxSchema,
-        frame: Rc<RefCell<LdapFrame>>,
+        frame: Arc<Mutex<LdapFrame>>,
         msg: LdapMsg,
     ) -> Self {
         Self {
@@ -168,7 +167,7 @@ impl LdapSearchStreamBuilder {
 #[derive(Default)]
 pub struct LdapSearchStreamBuilder {
     schema: Option<DefaultAttributeSyntaxSchema>,
-    frame: Option<Rc<RefCell<LdapFrame>>>,
+    frame: Option<Arc<Mutex<LdapFrame>>>,
     search_base: Option<String>,
     filter: Option<LdapFilter>,
     scope: Option<JsLdapSearchScope>,
@@ -183,7 +182,7 @@ impl LdapSearchStreamBuilder {
         self
     }
 
-    pub fn frame(mut self, frame: Rc<RefCell<LdapFrame>>) -> Self {
+    pub fn frame(mut self, frame: Arc<Mutex<LdapFrame>>) -> Self {
         self.frame = Some(frame);
         self
     }
