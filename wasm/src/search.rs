@@ -14,7 +14,9 @@ use wasm_bindgen::prelude::*;
 use crate::{
     call_js_function, call_js_function_serde,
     schema::{
-        attribute_schema::{to_displayable_entry, VectorScheme},
+        attribute_schema::{
+            to_displayable_entry, AttributeSyntaxSchema, BinaryAttributeSyntaxSchema, VectorScheme,
+        },
         displayables::{DisplayableSearchMessage, DisplayableSearchOp},
     },
     to_js_error, JsResult,
@@ -26,7 +28,7 @@ use crate::{
 
 #[wasm_bindgen]
 pub struct LdapSearchResultStream {
-    schema: DefaultAttributeSyntaxSchema,
+    schema: Box<dyn AttributeSyntaxSchema<Error = anyhow::Error>>,
     frame: Arc<Mutex<LdapFrame>>,
     request_message: LdapMsg,
 }
@@ -74,11 +76,11 @@ impl LdapSearchResultStream {
                 let LdapMsg { op, ctrl, msgid } = response;
                 match op {
                     LdapOp::SearchResultEntry(entry) => {
-                        let displayable_entry = to_displayable_entry(&schema, entry);
+                        let displayable_entry = to_displayable_entry(schema.as_ref(), entry);
                         match displayable_entry {
                             Ok(entry) => {
                                 let message = DisplayableSearchMessage {
-                                    msgid: msgid,
+                                    msgid,
                                     op: DisplayableSearchOp::SearchEntry(entry),
                                     ctrl: ctrl.into(),
                                 };
@@ -93,7 +95,14 @@ impl LdapSearchResultStream {
                         }
                     }
                     LdapOp::SearchResultReference(..) => continue,
-                    LdapOp::SearchResultDone(..) => break Ok(()),
+                    LdapOp::SearchResultDone(msg) => {
+                        let message = DisplayableSearchMessage {
+                            msgid,
+                            op: DisplayableSearchOp::SearchDone(msg),
+                            ctrl: ctrl.into(),
+                        };
+                        break Ok(call_js_function_serde!(callback_clone, message));
+                    }
                     _ => {
                         break Err(to_js_error!(
                             "Invalid response type, either search is rejected or the lock on websocket has failed"
@@ -112,7 +121,7 @@ impl LdapSearchResultStream {
 
 impl LdapSearchResultStream {
     pub fn new(
-        schema: DefaultAttributeSyntaxSchema,
+        schema: Box<dyn AttributeSyntaxSchema<Error = anyhow::Error>>,
         frame: Arc<Mutex<LdapFrame>>,
         msg: LdapMsg,
     ) -> Self {
@@ -131,7 +140,6 @@ impl LdapSearchStreamBuilder {
         js_shcema: VectorScheme,
     ) -> JsResult<LdapSearchResultStream> {
         let LdapSearchStreamBuilder {
-            schema,
             frame,
             search_base,
             scope,
@@ -141,7 +149,7 @@ impl LdapSearchStreamBuilder {
             message_id,
         } = self;
 
-        let mut schema = schema.unwrap_or_default();
+        let mut schema = DefaultAttributeSyntaxSchema::default();
         schema.extend_from_vector_scheme(js_shcema);
 
         let request = LdapSearchRequest {
@@ -162,7 +170,47 @@ impl LdapSearchStreamBuilder {
         };
 
         Ok(LdapSearchResultStream::new(
-            schema,
+            Box::new(schema),
+            frame.ok_or(to_js_error!("missing stream"))?,
+            msg,
+        ))
+    }
+
+    pub fn with_binary_attributes(
+        self,
+        attributes: Vec<String>,
+    ) -> JsResult<LdapSearchResultStream> {
+        let LdapSearchStreamBuilder {
+            frame,
+            search_base,
+            scope,
+            size_limit,
+            filter,
+            time_limit,
+            message_id,
+        } = self;
+
+        let schema = BinaryAttributeSyntaxSchema;
+
+        let request = LdapSearchRequest {
+            base: search_base.ok_or(to_js_error!("Search base not set"))?,
+            filter: filter.ok_or(to_js_error!("Filter not set"))?,
+            scope: scope.ok_or(to_js_error!("Scope not set"))?.into(),
+            attrs: attributes,
+            aliases: ldap3_proto::proto::LdapDerefAliases::Never,
+            sizelimit: size_limit.unwrap_or(1000),
+            timelimit: time_limit.unwrap_or(10),
+            typesonly: false,
+        };
+
+        let msg = LdapMsg {
+            msgid: message_id.ok_or_else(|| to_js_error!("Message id not set"))?,
+            op: LdapOp::SearchRequest(request),
+            ctrl: vec![],
+        };
+
+        Ok(LdapSearchResultStream::new(
+            Box::new(schema),
             frame.ok_or(to_js_error!("missing stream"))?,
             msg,
         ))
@@ -172,7 +220,6 @@ impl LdapSearchStreamBuilder {
 #[wasm_bindgen]
 #[derive(Default)]
 pub struct LdapSearchStreamBuilder {
-    schema: Option<DefaultAttributeSyntaxSchema>,
     frame: Option<Arc<Mutex<LdapFrame>>>,
     search_base: Option<String>,
     filter: Option<LdapFilter>,
@@ -183,11 +230,6 @@ pub struct LdapSearchStreamBuilder {
 }
 
 impl LdapSearchStreamBuilder {
-    pub fn schema(mut self, schema: DefaultAttributeSyntaxSchema) -> Self {
-        self.schema = Some(schema);
-        self
-    }
-
     pub fn frame(mut self, frame: Arc<Mutex<LdapFrame>>) -> Self {
         self.frame = Some(frame);
         self
@@ -223,3 +265,14 @@ impl LdapSearchStreamBuilder {
         self
     }
 }
+
+// #[wasm_bindgen]
+// pub fn parse_binary_attribute(
+//     entry: DisplayableEntry,
+//     js_schema: VectorScheme,
+// ) -> DisplayableEntry {
+//     let mut schema = DefaultAttributeSyntaxSchema::default();
+//     schema.extend_from_vector_scheme(js_schema);
+//     // to_displayable_entry(&schema, entry.into())
+//     todo!()
+// }
