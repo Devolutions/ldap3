@@ -18,14 +18,10 @@ use wasm_bindgen::prelude::*;
 use ws_stream_wasm::WsStreamIo;
 
 use crate::{
-    error::JsErrorValue,
-    modify::LdapModifies,
-    replace_with_new_vec, return_msg_if_type_matches,
-    schema::displayables::{DisplayableAttributes},
-    search::LdapSearchStreamBuilder,
-    send_message,
+    error::JsErrorValue, modify::LdapModifies, replace_with_new_vec, return_msg_if_type_matches,
+    schema::displayables::DisplayableAttributes, search::LdapSearchStreamBuilder, send_message,
 };
-use crate::{modify::DisplayableModify, schema::attribute_schema::DefaultAttributeSyntaxSchema};
+use crate::{modify::DisplayableModify};
 use crate::{to_js_error, JsResult};
 
 pub(crate) type LdapFrame = Framed<IoStream<WsStreamIo, Vec<u8>>, LdapCodec>;
@@ -132,7 +128,6 @@ impl LdapSession {
             parse_ldap_filter_str(&filter).map_err(|e| to_js_error!("Invalid filter : {:?}", e))?;
 
         let builder = LdapSearchStreamBuilder::default()
-            .schema(DefaultAttributeSyntaxSchema::default())
             .frame(self.frame.clone())
             .search_base(search_base)
             .filter(filter)

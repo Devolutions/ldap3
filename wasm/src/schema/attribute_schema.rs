@@ -1,10 +1,12 @@
+use core::fmt;
 use std::collections::HashMap;
 
-use anyhow::Result;
+use anyhow::{Ok, Result};
 
 use ldap3_proto::{proto::LdapAttribute, LdapPartialAttribute, LdapSearchResultEntry};
 use serde::{Deserialize, Serialize};
-use tracing::instrument;
+use tracing::{instrument, trace};
+
 use tsify::Tsify;
 
 use super::displayables::{
@@ -45,7 +47,7 @@ pub enum ADAttributeSyntax {
 
 /// LDAP Bytes->Rust->JS
 pub trait AttributeSyntaxSchema {
-    type Error;
+    type Error: fmt::Debug;
     fn to_displayable_attribute(
         &self,
         attribute: LdapAttribute,
@@ -123,11 +125,15 @@ impl AttributeSyntaxSchema for DefaultAttributeSyntaxSchema {
                 }
                 DisplayableAttributesValueType::Enum => self.convert_to_u8_attribute(attribute),
             },
-            None => Err(anyhow::anyhow!("Attribute not found")),
+            None => {
+                trace!("No attribute type found for {:?}", attribute.atype);
+                Ok(self.convert_to_bytes_attribute(attribute))
+            }
         }?;
         Ok(displayable_attribute)
     }
 
+    #[instrument(skip(self), level = tracing::Level::TRACE)]
     fn convert_to_bytes_attribute(&self, attribute: LdapAttribute) -> DisplayableAttribute {
         let LdapPartialAttribute { atype, vals } = attribute;
         DisplayableAttribute {
@@ -261,40 +267,49 @@ impl DefaultAttributeSyntaxSchema {
     }
 }
 
-/* Typescript Type
-type Attributes = {
-    attribute_name:string,
-    attribute_value: {
-        type:"String",
-        value: string[]
-    } | {
-        type : "Integer",
-        value : number[]
-    } | {
-        type: "Boolean",
-        value: boolean[]
-    } | {
-        type: "Date",
-        value: string[]
-    } | {
-        type : "Bytes",
-        value: Uint8Array[]
-    } | {
-        type: "Enum",
-        value: Uint8Array
+//==================================================================================================
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct BinaryAttributeSyntaxSchema;
+
+impl BinaryAttributeSyntaxSchema {
+    pub fn new() -> Self {
+        Self {}
     }
 }
-*/
+
+impl AttributeSyntaxSchema for BinaryAttributeSyntaxSchema {
+    type Error = anyhow::Error;
+
+    #[instrument(skip(self), level = tracing::Level::TRACE)]
+    fn to_displayable_attribute(
+        &self,
+        attribute: LdapAttribute,
+    ) -> Result<DisplayableAttribute, Self::Error> {
+        Ok(self.convert_to_bytes_attribute(attribute))
+    }
+
+    #[instrument(skip(self), level = tracing::Level::TRACE)]
+    fn convert_to_bytes_attribute(&self, attribute: LdapAttribute) -> DisplayableAttribute {
+        let LdapPartialAttribute { atype, vals } = attribute;
+        DisplayableAttribute {
+            attribute_name: atype,
+            attribute_value: DisplayableAttributesValues::Bytes(vals),
+        }
+    }
+}
 
 pub fn to_displayable_entry(
-    schema: &DefaultAttributeSyntaxSchema,
+    schema: &dyn AttributeSyntaxSchema<Error = anyhow::Error>,
     source: LdapSearchResultEntry,
 ) -> Result<DisplayableEntry> {
     let LdapSearchResultEntry { dn, attributes } = source;
 
     let mut displayable_attributes = Vec::new();
     for attribute in attributes {
-        let displayable_attribute = schema.to_displayable_attribute(attribute)?;
+        let displayable_attribute = schema
+            .to_displayable_attribute(attribute)
+            .map_err(|e| anyhow::anyhow!("Error converting attribute {:?}", e))?;
         displayable_attributes.push(displayable_attribute);
     }
 

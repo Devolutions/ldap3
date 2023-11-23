@@ -192,6 +192,7 @@ impl From<DisplayableSearchMessage> for LdapMsg {
     }
 }
 
+#[allow(clippy::enum_variant_names)]
 #[derive(Debug, Clone, Serialize, Deserialize, Tsify)]
 #[serde(rename_all = "snake_case")]
 #[tsify(into_wasm_abi, from_wasm_abi)]
