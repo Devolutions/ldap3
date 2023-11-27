@@ -13,36 +13,82 @@ use super::displayables::{
     DisplayableAttribute, DisplayableAttributesValueType, DisplayableAttributesValues,
     DisplayableEntry,
 };
+use enum_assoc::Assoc;
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
-pub enum ADAttributeSyntax {
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Assoc)]
+#[func(pub fn oid(&self) -> &'static str)]
+#[func(pub fn from_oid(oid: &str) -> Option<Self>)]
+enum LdapSyntax {
+    #[assoc(oid = "2.5.5.8")]
     Boolean,
+    #[assoc(oid = "2.5.5.9")]
     Enumeration,
-    EnumerationDeliveryMechanism,
-    EnumerationExportInformationLevel,
-    EnumerationPreferredDeliveryMethod,
+    #[assoc(oid = "2.5.5.9")]
     Integer,
-    Interval,
+    #[assoc(oid = "2.5.5.16")]
     LargeInteger,
+    #[assoc(oid = "2.5.5.14")]
     ObjectAccessPoint,
-    ObjectDNBinary,
-    ObjectDNString,
-    ObjectDSDN,
-    ObjectORName,
+    #[assoc(oid = "2.5.5.14")]
+    ObjectDnString,
+    #[assoc(oid = "2.5.5.7")]
+    ObjectOrName,
+    #[assoc(oid = "2.5.5.7")]
+    ObjectDnBinary,
+    #[assoc(oid = "2.5.5.1")]
+    ObjectDsDn,
+    #[assoc(oid = "2.5.5.13")]
     ObjectPresentationAddress,
+    #[assoc(oid = "2.5.5.10")]
     ObjectReplicaLink,
-    StringCaseSensitive,
-    StringGeneralizedTime,
-    StringIA5,
-    StringNTSecDesc,
+    #[assoc(oid = "2.5.5.3")]
+    StringCase,
+    #[assoc(oid = "2.5.5.5")]
+    StringIa5,
+    #[assoc(oid = "2.5.5.15")]
+    StringNtSecDesc,
+    #[assoc(oid = "2.5.5.6")]
     StringNumeric,
+    #[assoc(oid = "2.5.5.2")]
     StringObjectIdentifier,
+    #[assoc(oid = "2.5.5.10")]
     StringOctet,
+    #[assoc(oid = "2.5.5.5")]
     StringPrintable,
+    #[assoc(oid = "2.5.5.17")]
     StringSid,
+    #[assoc(oid = "2.5.5.4")]
     StringTeletex,
+    #[assoc(oid = "2.5.5.12")]
     StringUnicode,
-    StringUTCTime,
+    #[assoc(oid = "2.5.5.11")]
+    StringUtcTime,
+    #[assoc(oid = "2.5.5.11")]
+    StringGeneralizedTime,
+}
+
+/*
+ Ultimately, I want to give a function such that, given a attribute, and a oid, I shall be able to convert it to a DisplayableAttribute
+*/
+
+pub fn to_string(oid: String) -> String {
+    // let property_type = LdapSyntax::oid(&oid);
+    let property_type = LdapSyntax::from_oid(&oid).unwrap();
+    // let property_type = LdapSyntax::Boolean;
+    match property_type {
+        LdapSyntax::StringUnicode => {}
+        LdapSyntax::StringGeneralizedTime | LdapSyntax::StringUtcTime => {}
+        LdapSyntax::LargeInteger => {
+            todo!()
+        }
+        LdapSyntax::Integer | LdapSyntax::ObjectDsDn | LdapSyntax::StringObjectIdentifier => {
+            todo!()
+        }
+        LdapSyntax::StringOctet => todo!(),
+        LdapSyntax::StringSid => todo!(),
+        _ => todo!(),
+    }
+    todo!()
 }
 
 /// LDAP Bytes->Rust->JS

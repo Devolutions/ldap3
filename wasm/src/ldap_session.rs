@@ -17,11 +17,11 @@ use tokio_util::codec::Framed;
 use wasm_bindgen::prelude::*;
 use ws_stream_wasm::WsStreamIo;
 
+use crate::modify::DisplayableModify;
 use crate::{
     error::JsErrorValue, modify::LdapModifies, replace_with_new_vec, return_msg_if_type_matches,
     schema::displayables::DisplayableAttributes, search::LdapSearchStreamBuilder, send_message,
 };
-use crate::{modify::DisplayableModify};
 use crate::{to_js_error, JsResult};
 
 pub(crate) type LdapFrame = Framed<IoStream<WsStreamIo, Vec<u8>>, LdapCodec>;
