@@ -3,7 +3,6 @@ use wasm_bindgen::{prelude::wasm_bindgen, JsValue};
 
 pub mod error;
 pub mod ldap_session;
-pub mod listener;
 pub mod modify;
 pub mod schema;
 pub mod search;
