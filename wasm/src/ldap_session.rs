@@ -90,32 +90,6 @@ impl LdapSession {
         Ok(())
     }
 
-    pub async fn bind(
-        &mut self,
-        distinguished_name: String,
-        password: String,
-    ) -> JsResult<JsValue> {
-        let msg = LdapMsg {
-            msgid: self.next_message_id(),
-            op: LdapOp::BindRequest(LdapBindRequest {
-                dn: distinguished_name,
-                cred: LdapBindCred::Simple(password),
-            }),
-            ctrl: replace_with_new_vec!(&mut self.control),
-        };
-
-        let res = send_message!(self, msg);
-        match &res.op {
-            LdapOp::BindResponse(bind_response) => match &bind_response.res.code {
-                ldap3_proto::proto::LdapResultCode::Success => {
-                    Ok(serde_wasm_bindgen::to_value(&res)?)
-                }
-                _ => Err(serde_wasm_bindgen::to_value(&res)?),
-            },
-            _ => Err(to_js_error!("Invalid response")),
-        }
-    }
-
     pub fn search(
         &mut self,
         search_base: String,
@@ -241,6 +215,48 @@ impl LdapSession {
         return_msg_if_type_matches!(LdapOp::CompareResult, result)
     }
 }
+
+#[wasm_bindgen]
+impl LdapSession {
+    pub async fn bind(
+        &mut self,
+        distinguished_name: String,
+        password: String,
+    ) -> JsResult<JsValue> {
+        let msg = LdapMsg {
+            msgid: self.next_message_id(),
+            op: LdapOp::BindRequest(LdapBindRequest {
+                dn: distinguished_name,
+                cred: LdapBindCred::Simple(password),
+            }),
+            ctrl: replace_with_new_vec!(&mut self.control),
+        };
+
+        let res = send_message!(self, msg);
+        match &res.op {
+            LdapOp::BindResponse(bind_response) => match &bind_response.res.code {
+                ldap3_proto::proto::LdapResultCode::Success => {
+                    Ok(serde_wasm_bindgen::to_value(&res)?)
+                }
+                _ => Err(serde_wasm_bindgen::to_value(&res)?),
+            },
+            _ => Err(to_js_error!("Invalid response")),
+        }
+    }
+
+    pub async fn unbind(&mut self) -> JsResult<()> {
+        let msg = LdapMsg {
+            msgid: self.next_message_id(),
+            op: LdapOp::UnbindRequest,
+            ctrl: replace_with_new_vec!(&mut self.control),
+        };
+
+        let res = send_message!(self, msg);
+        Ok(())
+    }
+}
+
+//================================================================================================
 
 #[wasm_bindgen]
 pub enum JsLdapSearchScope {
