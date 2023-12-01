@@ -6,6 +6,7 @@ pub mod ldap_session;
 pub mod modify;
 pub mod schema;
 pub mod search;
+pub mod sspi;
 #[cfg(test)]
 mod test;
 pub mod types;
@@ -64,3 +65,15 @@ impl From<LoggingLevel> for Level {
         }
     }
 }
+
+pub struct JsFunction {
+    pub callback: js_sys::Function,
+}
+
+// impl<T> FnOnce<T> for JsFunction {
+//     type Output = T;
+
+//     extern "rust-call" fn call_once(self, args: T) -> Self::Output {
+//         todo!()
+//     }
+// }

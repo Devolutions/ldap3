@@ -1,5 +1,6 @@
 use wasm_bindgen_test::*;
 
+pub mod attributes_syntax;
 pub mod serialization;
 wasm_bindgen_test_configure!(run_in_browser);
 
@@ -8,11 +9,11 @@ async fn test_derialize_modify() {
     let js_modify = js_sys::JSON::parse(
         r#"
             {
-                "operation": 0,
+                "operation": "Add",
                 "attribute": {
                     "attribute_name": "cn",
                     "attribute_value": {
-                        "type": "String",
+                        "type": "string",
                         "value": [
                             "string",
                             "string2"
