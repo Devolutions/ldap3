@@ -3,17 +3,17 @@ use core::fmt;
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[wasm_bindgen]
+pub struct JsErrorValue {
+    error: String,
+}
+
 #[macro_export]
 macro_rules! to_js_error {
     ($($arg:tt)*) => {
         JsErrorValue::new(format!($($arg)*).as_str()).to_js_value()
     };
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[wasm_bindgen]
-pub struct JsErrorValue {
-    error: String,
 }
 
 impl JsErrorValue {

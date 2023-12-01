@@ -7,14 +7,21 @@ use futures_util::StreamExt;
 
 use ldap3_proto::{
     parse_ldap_filter_str,
-    proto::{LdapAddRequest, LdapBindCred, LdapBindRequest, LdapModify, LdapModifyRequest, LdapOp},
-    LdapCodec, LdapMsg, LdapSearchScope,
+    proto::{
+        LdapAddRequest, LdapBindCred, LdapBindRequest, LdapModify, LdapModifyRequest, LdapOp,
+        LdapSearchRequest,
+    },
+    LdapCodec, LdapMsg, LdapSearchResultEntry, LdapSearchScope,
 };
+use tracing::info;
 
+use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use tokio_util::codec::Framed;
 
+use tsify::Tsify;
 use wasm_bindgen::prelude::*;
+use web_sys::console::info;
 use ws_stream_wasm::WsStreamIo;
 
 use crate::modify::DisplayableModify;
@@ -90,6 +97,9 @@ impl LdapSession {
         Ok(())
     }
 
+    /*
+    Important: looks like the wildcard filter is broken, further investigation required
+     */
     pub fn search(
         &mut self,
         search_base: String,
@@ -214,6 +224,135 @@ impl LdapSession {
         let result = send_message!(self, msg);
         return_msg_if_type_matches!(LdapOp::CompareResult, result)
     }
+
+    /*
+       base dn is the domain, example: dc=example,dc=com
+       attribute_name is the name of the attribute, example: User-Principal-Name
+       notice that the naming convention of the attribute name is different from the one used in the attribute value type
+       User-Principal-Name is the attribute name, while userPrincipalName is the attribute value type
+    */
+    pub async fn get_ldap_syntax(
+        &mut self,
+        attribute_name: String,
+        base_cn: String,
+    ) -> Option<LdapSyntaxIdentifier> {
+        let cn = format!("CN=Schema,CN=Configuration,{}", base_cn);
+        let search_filter = format!("(cn=*{}*)", attribute_name);
+        let search_attributes = vec!["attributeSyntax".to_string(), "oMSyntax".to_string()];
+
+        let search_req = LdapOp::SearchRequest(LdapSearchRequest {
+            base: cn,
+            filter: parse_ldap_filter_str(&search_filter).unwrap(),
+            scope: LdapSearchScope::Base,
+            attrs: search_attributes,
+            aliases: ldap3_proto::proto::LdapDerefAliases::Never,
+            sizelimit: 1,
+            timelimit: 10,
+            typesonly: false,
+        });
+
+        let msg: LdapMsg = LdapMsg {
+            msgid: self.next_message_id(),
+            op: search_req.clone(),
+            ctrl: replace_with_new_vec!(&mut self.control),
+        };
+
+        let res = {
+            let mut frame = self.frame.lock().await;
+            frame.send(msg).await.unwrap();
+            loop {
+                let response = frame.next().await.unwrap().unwrap();
+                info!("response received: {:?}", &response);
+                let LdapMsg {
+                    op,
+                    msgid: _,
+                    ctrl: _,
+                } = response;
+                match op {
+                    LdapOp::SearchResultDone(_) => {
+                        info!("search res done, break");
+                        break None;
+                    }
+                    LdapOp::SearchResultEntry(entry) => {
+                        let LdapSearchResultEntry { dn: _, attributes } = entry;
+                        let mut attribute_syntax = attributes
+                            .iter()
+                            .filter(|v| v.atype == "attributeSyntax")
+                            .map(|v| v.vals.clone())
+                            .map(|bytes_arr| {
+                                bytes_arr
+                                    .into_iter()
+                                    .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
+                                    .collect::<Vec<String>>()
+                            })
+                            .next()
+                            .ok_or(to_js_error!("attributeSyntax not found"))
+                            .unwrap();
+
+                        let mut omsyntax = attributes
+                            .iter()
+                            .filter(|v| v.atype == "oMSyntax")
+                            .map(|v| v.vals.clone())
+                            .map(|bytes_arr| {
+                                bytes_arr
+                                    .into_iter()
+                                    .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
+                                    .collect::<Vec<String>>()
+                            })
+                            .next()
+                            .ok_or(to_js_error!("oMSyntax not found"))
+                            .unwrap();
+
+                        let iden = LdapSyntaxIdentifier {
+                            oid: attribute_syntax.pop().expect("attributeSyntax not found"),
+                            om_syntax: omsyntax.pop().expect("oMSyntax not found"),
+                        };
+
+                        break Some(iden);
+                    }
+                    LdapOp::SearchResultReference(_) => {
+                        continue;
+                    }
+                    _ => {
+                        panic!("Unexpected response");
+                    }
+                }
+            }
+        };
+
+        res
+    }
+}
+
+#[derive(Debug, Tsify, Serialize, Deserialize)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
+pub struct LdapSyntaxIdentifierType {
+    oid: String,
+    om_syntax: String,
+}
+
+#[wasm_bindgen]
+pub struct LdapSyntaxIdentifier {
+    oid: String,
+    om_syntax: String,
+}
+
+impl LdapSyntaxIdentifier {
+    pub fn get_oid(&self) -> String {
+        self.oid.clone()
+    }
+
+    pub fn get_om_syntax(&self) -> String {
+        self.om_syntax.clone()
+    }
+
+    pub fn to_object(&self) -> JsValue {
+        let res = LdapSyntaxIdentifierType {
+            oid: self.oid.clone(),
+            om_syntax: self.om_syntax.clone(),
+        };
+        serde_wasm_bindgen::to_value(&res).unwrap()
+    }
 }
 
 #[wasm_bindgen]
@@ -251,8 +390,17 @@ impl LdapSession {
             ctrl: replace_with_new_vec!(&mut self.control),
         };
 
-        let res = send_message!(self, msg);
+        self.frame
+            .lock()
+            .await
+            .send(msg)
+            .await
+            .map_err(|e| to_js_error!("Unable to send unbind request -> {:?}", e))?;
         Ok(())
+    }
+
+    pub async fn ntlm_bind(&mut self, username: String, password: String) -> JsResult<JsValue> {
+        todo!()
     }
 }
 

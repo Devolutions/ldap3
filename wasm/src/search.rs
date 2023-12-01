@@ -265,14 +265,3 @@ impl LdapSearchStreamBuilder {
         self
     }
 }
-
-// #[wasm_bindgen]
-// pub fn parse_binary_attribute(
-//     entry: DisplayableEntry,
-//     js_schema: VectorScheme,
-// ) -> DisplayableEntry {
-//     let mut schema = DefaultAttributeSyntaxSchema::default();
-//     schema.extend_from_vector_scheme(js_schema);
-//     // to_displayable_entry(&schema, entry.into())
-//     todo!()
-// }
