@@ -9,70 +9,15 @@ use wasm_bindgen::prelude::wasm_bindgen;
 // ================================================================================================= Attribute Values
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Tsify)]
 #[serde(rename_all = "snake_case")]
-#[serde(tag = "type", content = "value")]
 #[tsify(into_wasm_abi, from_wasm_abi)]
-pub enum DisplayableAttributesValues {
-    String(Vec<String>),
-    Integer(Vec<i32>),
-    Boolean(Vec<bool>),
-    Date(Vec<String>),
-    Bytes(Vec<Vec<u8>>),
-    Enum(Vec<u8>),
+pub struct AttibuteValue {
+    pub value: Vec<Vec<u8>>,
 }
 
-impl DisplayableAttributesValues {
-    pub fn get_type(&self) -> DisplayableAttributesValueType {
-        match self {
-            DisplayableAttributesValues::String(_) => DisplayableAttributesValueType::String,
-            DisplayableAttributesValues::Integer(_) => DisplayableAttributesValueType::Integer,
-            DisplayableAttributesValues::Boolean(_) => DisplayableAttributesValueType::Boolean,
-            DisplayableAttributesValues::Date(_) => DisplayableAttributesValueType::Date,
-            DisplayableAttributesValues::Bytes(_) => DisplayableAttributesValueType::Bytes,
-            DisplayableAttributesValues::Enum(_) => DisplayableAttributesValueType::Enum,
-        }
+impl From<AttibuteValue> for Vec<Vec<u8>> {
+    fn from(val: AttibuteValue) -> Self {
+        val.value
     }
-}
-
-impl From<DisplayableAttributesValues> for Vec<Vec<u8>> {
-    fn from(val: DisplayableAttributesValues) -> Self {
-        match val {
-            DisplayableAttributesValues::String(value) => {
-                value.into_iter().map(|v| v.into_bytes()).collect()
-            }
-            DisplayableAttributesValues::Integer(ints) => {
-                ints.into_iter().map(|v| v.to_be_bytes().to_vec()).collect()
-            }
-            DisplayableAttributesValues::Boolean(bools) => bools
-                .into_iter()
-                .map(|v| {
-                    if v {
-                        b"TRUE".to_vec()
-                    } else {
-                        b"FALSE".to_vec()
-                    }
-                })
-                .collect(),
-            DisplayableAttributesValues::Date(date) => {
-                date.into_iter().map(|v| v.into_bytes()).collect()
-            }
-            DisplayableAttributesValues::Bytes(bytes) => bytes,
-            DisplayableAttributesValues::Enum(enums) => {
-                enums.into_iter().map(|v| vec![v]).collect()
-            }
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, Tsify)]
-#[tsify(into_wasm_abi, from_wasm_abi)]
-#[serde(rename_all = "snake_case")]
-pub enum DisplayableAttributesValueType {
-    String,
-    Integer,
-    Boolean,
-    Date,
-    Bytes,
-    Enum,
 }
 
 // ================================================================================================= Attirbutes
@@ -80,11 +25,11 @@ pub enum DisplayableAttributesValueType {
 #[tsify(into_wasm_abi, from_wasm_abi)]
 pub struct DisplayableAttribute {
     pub attribute_name: String,
-    pub attribute_value: DisplayableAttributesValues,
+    pub attribute_value: AttibuteValue,
 }
 
 impl DisplayableAttribute {
-    pub fn new(a_name: String, val: DisplayableAttributesValues) -> Self {
+    pub fn new(a_name: String, val: AttibuteValue) -> Self {
         Self {
             attribute_name: a_name,
             attribute_value: val,
