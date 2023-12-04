@@ -9,15 +9,16 @@ use ldap3_proto::{
 };
 
 use tokio::sync::Mutex;
+use tracing::info;
 use wasm_bindgen::prelude::*;
 
-use crate::ldap_session::JsLdapSearchScope;
 use crate::{
     call_js_function, call_js_function_serde,
     schema::displayables::{DisplayableSearchMessage, DisplayableSearchOp},
     to_js_error, JsResult,
 };
 use crate::{error::JsErrorValue, ldap_session::LdapFrame};
+use crate::{ldap_session::JsLdapSearchScope, schema::displayables::DisplayableEntry};
 
 #[wasm_bindgen]
 pub struct LdapSearchResultStream {
@@ -67,7 +68,12 @@ impl LdapSearchResultStream {
                 let LdapMsg { op, ctrl, msgid } = response;
                 match op {
                     LdapOp::SearchResultEntry(entry) => {
-                        call_js_function_serde!(callback_clone, entry);
+                        let message = DisplayableSearchMessage {
+                            msgid,
+                            op: DisplayableSearchOp::SearchEntry(entry.into()),
+                            ctrl: ctrl.into(),
+                        };
+                        call_js_function_serde!(callback_clone, message);
                     }
                     LdapOp::SearchResultReference(..) => continue,
                     LdapOp::SearchResultDone(msg) => {
@@ -76,6 +82,7 @@ impl LdapSearchResultStream {
                             op: DisplayableSearchOp::SearchDone(msg),
                             ctrl: ctrl.into(),
                         };
+                        info!("search is done, message = {:?}", message);
                         break Ok(call_js_function_serde!(callback_clone, message));
                     }
                     _ => {

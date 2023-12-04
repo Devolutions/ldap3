@@ -100,9 +100,9 @@ impl LdapSession {
         search_base: String,
         filter: String,
         scope: JsLdapSearchScope,
+        attributes: Vec<String>,
         size_limit: Option<i32>,
         time_limit: Option<i32>,
-        attributes: Vec<String>,
     ) -> JsResult<LdapSearchResultStream> {
         let filter =
             parse_ldap_filter_str(&filter).map_err(|e| to_js_error!("Invalid filter : {:?}", e))?;

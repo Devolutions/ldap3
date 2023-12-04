@@ -10,13 +10,18 @@ use wasm_bindgen::prelude::wasm_bindgen;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Tsify)]
 #[serde(rename_all = "snake_case")]
 #[tsify(into_wasm_abi, from_wasm_abi)]
-pub struct AttibuteValue {
-    pub value: Vec<Vec<u8>>,
-}
+pub struct AttibuteValue(pub(crate) Vec<Vec<u8>>);
 
 impl From<AttibuteValue> for Vec<Vec<u8>> {
     fn from(val: AttibuteValue) -> Self {
-        val.value
+        val.0
+    }
+}
+
+#[wasm_bindgen]
+impl AttibuteValue {
+    pub fn get_raw_value() {
+        panic!("this works")
     }
 }
 
@@ -51,6 +56,9 @@ impl From<DisplayableAttribute> for LdapPartialAttribute {
     }
 }
 
+/*
+For auto Typescript generation
+*/
 #[derive(Debug, Clone, Serialize, Deserialize, Tsify)]
 #[tsify(into_wasm_abi, from_wasm_abi)]
 pub struct DisplayableAttributes(pub Vec<DisplayableAttribute>);
@@ -67,6 +75,15 @@ impl From<DisplayableAttributes> for Vec<LdapPartialAttribute> {
     }
 }
 
+impl From<LdapPartialAttribute> for DisplayableAttribute {
+    fn from(value: LdapPartialAttribute) -> Self {
+        Self {
+            attribute_name: value.atype,
+            attribute_value: AttibuteValue(value.vals),
+        }
+    }
+}
+
 // ================================================================================================= Entries
 #[derive(Debug, Clone, Deserialize, Serialize, Tsify)]
 #[tsify(into_wasm_abi, from_wasm_abi)]
@@ -79,6 +96,16 @@ impl From<DisplayableEntry> for LdapSearchResultEntry {
     fn from(val: DisplayableEntry) -> Self {
         let DisplayableEntry { dn, attributes } = val;
         LdapSearchResultEntry {
+            dn,
+            attributes: attributes.into_iter().map(|a| a.into()).collect(),
+        }
+    }
+}
+
+impl From<LdapSearchResultEntry> for DisplayableEntry {
+    fn from(value: LdapSearchResultEntry) -> Self {
+        let LdapSearchResultEntry { dn, attributes } = value;
+        DisplayableEntry {
             dn,
             attributes: attributes.into_iter().map(|a| a.into()).collect(),
         }
