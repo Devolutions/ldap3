@@ -9,7 +9,7 @@ use tsify::Tsify;
 use crate::error::JsErrorValue;
 use crate::{to_js_error, JsResult};
 
-use super::displayables::AttibuteValue;
+use super::displayables::{AttibuteValue, DisplayableAttribute};
 use enum_assoc::Assoc;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Assoc, Tsify)]
@@ -169,8 +169,16 @@ impl LdapSyntax {
 }
 
 #[wasm_bindgen]
-impl LdapSyntax {
-    pub fn parse(
+pub struct LdapParser;
+
+#[wasm_bindgen]
+impl LdapParser {
+    /*
+    oid is the attributeSyntax from schema
+    om_syntax is the oMSyntax from schema
+    a combination of these two identifies a attibute syntax
+     */
+    pub fn parse_with_syntax_value(
         oid: String,
         om_syntax: String,
         attribute_value: AttibuteValue,
@@ -179,7 +187,15 @@ impl LdapSyntax {
             .into_iter()
             .find(|v| v.om_syntax() == &om_syntax)
             .ok_or(to_js_error!("No syntax found"))?;
-        LdapSyntax::to_displayable_impl(syntax, attribute_value)
+        LdapParser::to_displayable_impl(syntax, attribute_value)
+            .map_err(|e| to_js_error!("{:?}", e))
+    }
+
+    pub fn parse_value(
+        syntax: LdapSyntax,
+        attribute_value: AttibuteValue,
+    ) -> JsResult<Vec<JsValue>> {
+        LdapParser::to_displayable_impl(syntax, attribute_value)
             .map_err(|e| to_js_error!("{:?}", e))
     }
 
@@ -187,7 +203,7 @@ impl LdapSyntax {
         syntax: LdapSyntax,
         attribute_value: AttibuteValue,
     ) -> Result<Vec<JsValue>> {
-        let bytes_arr = attribute_value.value;
+        let bytes_arr = attribute_value.0;
         match syntax {
             LdapSyntax::StringUnicode
             | LdapSyntax::StringSid
