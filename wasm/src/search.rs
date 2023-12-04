@@ -11,24 +11,16 @@ use ldap3_proto::{
 use tokio::sync::Mutex;
 use wasm_bindgen::prelude::*;
 
+use crate::ldap_session::JsLdapSearchScope;
 use crate::{
     call_js_function, call_js_function_serde,
-    schema::{
-        attribute_schema::{
-            to_displayable_entry, AttributeSyntaxSchema, BinaryAttributeSyntaxSchema, VectorScheme,
-        },
-        displayables::{DisplayableSearchMessage, DisplayableSearchOp},
-    },
+    schema::displayables::{DisplayableSearchMessage, DisplayableSearchOp},
     to_js_error, JsResult,
 };
 use crate::{error::JsErrorValue, ldap_session::LdapFrame};
-use crate::{
-    ldap_session::JsLdapSearchScope, schema::attribute_schema::DefaultAttributeSyntaxSchema,
-};
 
 #[wasm_bindgen]
 pub struct LdapSearchResultStream {
-    schema: Box<dyn AttributeSyntaxSchema<Error = anyhow::Error>>,
     frame: Arc<Mutex<LdapFrame>>,
     request_message: LdapMsg,
 }
@@ -43,7 +35,6 @@ impl LdapSearchResultStream {
         }
 
         let LdapSearchResultStream {
-            schema,
             frame,
             request_message,
         } = self;
@@ -76,23 +67,7 @@ impl LdapSearchResultStream {
                 let LdapMsg { op, ctrl, msgid } = response;
                 match op {
                     LdapOp::SearchResultEntry(entry) => {
-                        let displayable_entry = to_displayable_entry(schema.as_ref(), entry);
-                        match displayable_entry {
-                            Ok(entry) => {
-                                let message = DisplayableSearchMessage {
-                                    msgid,
-                                    op: DisplayableSearchOp::SearchEntry(entry),
-                                    ctrl: ctrl.into(),
-                                };
-                                call_js_function_serde!(callback_clone, message)
-                            }
-                            Err(e) => {
-                                call_js_function!(
-                                    callback_clone,
-                                    to_js_error!("failed to convert entry {:?}", e)
-                                )
-                            }
-                        }
+                        call_js_function_serde!(callback_clone, entry);
                     }
                     LdapOp::SearchResultReference(..) => continue,
                     LdapOp::SearchResultDone(msg) => {
@@ -120,25 +95,16 @@ impl LdapSearchResultStream {
 }
 
 impl LdapSearchResultStream {
-    pub fn new(
-        schema: Box<dyn AttributeSyntaxSchema<Error = anyhow::Error>>,
-        frame: Arc<Mutex<LdapFrame>>,
-        msg: LdapMsg,
-    ) -> Self {
+    pub fn new(frame: Arc<Mutex<LdapFrame>>, msg: LdapMsg) -> Self {
         Self {
-            schema,
             frame,
             request_message: msg,
         }
     }
 }
 
-#[wasm_bindgen]
 impl LdapSearchStreamBuilder {
-    pub fn with_attribute_schema(
-        self,
-        js_shcema: VectorScheme,
-    ) -> JsResult<LdapSearchResultStream> {
+    pub fn build(self) -> JsResult<LdapSearchResultStream> {
         let LdapSearchStreamBuilder {
             frame,
             search_base,
@@ -147,16 +113,14 @@ impl LdapSearchStreamBuilder {
             filter,
             time_limit,
             message_id,
+            attributes,
         } = self;
-
-        let mut schema = DefaultAttributeSyntaxSchema::default();
-        schema.extend_from_vector_scheme(js_shcema);
 
         let request = LdapSearchRequest {
             base: search_base.ok_or(to_js_error!("Search base not set"))?,
             filter: filter.ok_or(to_js_error!("Filter not set"))?,
             scope: scope.ok_or(to_js_error!("Scope not set"))?.into(),
-            attrs: schema.get_keys(),
+            attrs: attributes.unwrap_or_default(),
             aliases: ldap3_proto::proto::LdapDerefAliases::Never,
             sizelimit: size_limit.unwrap_or(1000),
             timelimit: time_limit.unwrap_or(10),
@@ -170,54 +134,12 @@ impl LdapSearchStreamBuilder {
         };
 
         Ok(LdapSearchResultStream::new(
-            Box::new(schema),
-            frame.ok_or(to_js_error!("missing stream"))?,
-            msg,
-        ))
-    }
-
-    pub fn with_binary_attributes(
-        self,
-        attributes: Vec<String>,
-    ) -> JsResult<LdapSearchResultStream> {
-        let LdapSearchStreamBuilder {
-            frame,
-            search_base,
-            scope,
-            size_limit,
-            filter,
-            time_limit,
-            message_id,
-        } = self;
-
-        let schema = BinaryAttributeSyntaxSchema;
-
-        let request = LdapSearchRequest {
-            base: search_base.ok_or(to_js_error!("Search base not set"))?,
-            filter: filter.ok_or(to_js_error!("Filter not set"))?,
-            scope: scope.ok_or(to_js_error!("Scope not set"))?.into(),
-            attrs: attributes,
-            aliases: ldap3_proto::proto::LdapDerefAliases::Never,
-            sizelimit: size_limit.unwrap_or(1000),
-            timelimit: time_limit.unwrap_or(10),
-            typesonly: false,
-        };
-
-        let msg = LdapMsg {
-            msgid: message_id.ok_or_else(|| to_js_error!("Message id not set"))?,
-            op: LdapOp::SearchRequest(request),
-            ctrl: vec![],
-        };
-
-        Ok(LdapSearchResultStream::new(
-            Box::new(schema),
             frame.ok_or(to_js_error!("missing stream"))?,
             msg,
         ))
     }
 }
 
-#[wasm_bindgen]
 #[derive(Default)]
 pub struct LdapSearchStreamBuilder {
     frame: Option<Arc<Mutex<LdapFrame>>>,
@@ -227,6 +149,7 @@ pub struct LdapSearchStreamBuilder {
     size_limit: Option<i32>,
     time_limit: Option<i32>,
     message_id: Option<i32>,
+    attributes: Option<Vec<String>>,
 }
 
 impl LdapSearchStreamBuilder {
@@ -262,6 +185,11 @@ impl LdapSearchStreamBuilder {
 
     pub fn message_id(mut self, id: i32) -> Self {
         self.message_id = Some(id);
+        self
+    }
+
+    pub fn attributes(mut self, attributes: Vec<String>) -> Self {
+        self.attributes = Some(attributes);
         self
     }
 }

@@ -69,11 +69,3 @@ impl From<LoggingLevel> for Level {
 pub struct JsFunction {
     pub callback: js_sys::Function,
 }
-
-// impl<T> FnOnce<T> for JsFunction {
-//     type Output = T;
-
-//     extern "rust-call" fn call_once(self, args: T) -> Self::Output {
-//         todo!()
-//     }
-// }
