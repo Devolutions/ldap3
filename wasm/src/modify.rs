@@ -57,7 +57,12 @@ impl TryInto<LdapModify> for ModifyRequest {
     fn try_into(self) -> Result<LdapModify, Self::Error> {
         Ok(LdapModify {
             operation: self.operation.into(),
-            modification: self.attribute.try_into()?,
+            modification: self.attribute.into(),
         })
     }
 }
+
+//==============================================================================
+#[derive(Debug, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
+pub struct SearchMessage {}

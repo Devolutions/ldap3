@@ -71,7 +71,6 @@ impl LdapSearchResultStream {
                         let message = SearchMessage {
                             msgid,
                             op: SearchOperation::SearchEntry(entry.into()),
-                            ctrl: ctrl.into(),
                         };
                         call_js_function_serde!(callback_clone, message);
                     }
@@ -80,7 +79,6 @@ impl LdapSearchResultStream {
                         let message = SearchMessage {
                             msgid,
                             op: SearchOperation::SearchDone(msg),
-                            ctrl: ctrl.into(),
                         };
                         info!("search is done, message = {:?}", message);
                         break Ok(call_js_function_serde!(callback_clone, message));
