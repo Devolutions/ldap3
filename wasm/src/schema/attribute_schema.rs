@@ -9,7 +9,7 @@ use tsify::Tsify;
 use crate::error::JsErrorValue;
 use crate::{to_js_error, JsResult};
 
-use super::displayables::{AttibuteValue, DisplayableAttribute};
+use super::search_objects::{AttibuteValues, Attribute};
 use enum_assoc::Assoc;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Assoc, Tsify)]
@@ -113,6 +113,7 @@ pub enum LdapSyntax {
     StringGeneralizedTime,
 }
 
+#[wasm_bindgen]
 impl LdapSyntax {
     pub(crate) fn from_oid_to_vec(oid: &str) -> Vec<LdapSyntax> {
         match oid {
@@ -181,7 +182,7 @@ impl LdapParser {
     pub fn parse_with_syntax_value(
         oid: String,
         om_syntax: String,
-        attribute_value: AttibuteValue,
+        attribute_value: AttibuteValues,
     ) -> JsResult<Vec<JsValue>> {
         let syntax = LdapSyntax::from_oid_to_vec(&oid)
             .into_iter()
@@ -193,7 +194,7 @@ impl LdapParser {
 
     pub fn parse_value(
         syntax: LdapSyntax,
-        attribute_value: AttibuteValue,
+        attribute_value: AttibuteValues,
     ) -> JsResult<Vec<JsValue>> {
         LdapParser::to_displayable_impl(syntax, attribute_value)
             .map_err(|e| to_js_error!("{:?}", e))
@@ -201,9 +202,9 @@ impl LdapParser {
 
     fn to_displayable_impl(
         syntax: LdapSyntax,
-        attribute_value: AttibuteValue,
+        attribute_value: AttibuteValues,
     ) -> Result<Vec<JsValue>> {
-        let bytes_arr = attribute_value.0;
+        let bytes_arr = attribute_value.into();
         match syntax {
             LdapSyntax::StringUnicode
             | LdapSyntax::StringSid
@@ -343,7 +344,3 @@ impl LdapSyntax {
     }
 }
 
-/*
-https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-adts/7cda533e-d7a4-4aec-a517-91d02ff4a1aa
-Each Syntax is identified by the combination of an OID and an OM syntax.
-*/

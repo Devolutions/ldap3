@@ -1,2 +1,2 @@
 pub mod attribute_schema;
-pub mod displayables;
+pub mod search_objects;

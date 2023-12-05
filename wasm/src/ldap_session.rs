@@ -23,11 +23,11 @@ use wasm_bindgen::prelude::*;
 use ws_stream_wasm::WsStreamIo;
 
 use crate::{
-    authentication::AuthProvier, error::JsErrorValue, modify::LdapModifies, replace_with_new_vec,
-    return_msg_if_type_matches, schema::displayables::DisplayableAttributes,
+    authentication::AuthProvier, error::JsErrorValue, modify::BinaryLdapModifies,
+    replace_with_new_vec, return_msg_if_type_matches, schema::search_objects::AttributesArray,
     search::LdapSearchStreamBuilder, send_message,
 };
-use crate::{modify::DisplayableModify, search::LdapSearchResultStream};
+use crate::{modify::ModifyRequest, search::LdapSearchResultStream};
 use crate::{to_js_error, JsResult};
 
 pub(crate) type LdapFrame = Framed<IoStream<WsStreamIo, Vec<u8>>, LdapCodec>;
@@ -69,6 +69,12 @@ impl LdapSession {
             we lock the frame while sending a message and receiving the response. This is not ideal, but it works for now.
             in the future, we should have some machanism to ensure that the messages are received in the same order as they were sent
             as well as to avoid locking the frame while waiting for a response.
+
+Note: for those who wonder why I write code this way, Is because until today, 2023,Dec, it is still very hard to have a typed value and struct to pass
+    from and into Typescript.
+    1. I want to preserve the type information of the struct, so I can use it in Typescript
+    2. I want to automatically serialize and deserialize the struct, so I can pass it from and into Typescript
+
 */
 #[wasm_bindgen]
 impl LdapSession {
@@ -124,11 +130,7 @@ impl LdapSession {
         builder.build()
     }
 
-    pub async fn add(
-        &mut self,
-        dn: String,
-        attributes: DisplayableAttributes,
-    ) -> JsResult<JsValue> {
+    pub async fn add(&mut self, dn: String, attributes: AttributesArray) -> JsResult<JsValue> {
         let request = LdapAddRequest {
             dn,
             attributes: attributes.into(),
@@ -181,9 +183,9 @@ impl LdapSession {
     }
 
     /// modify is of type LdapModify[]
-    pub async fn modify(&mut self, dn: String, modifies: LdapModifies) -> JsResult<JsValue> {
+    pub async fn modify(&mut self, dn: String, modifies: BinaryLdapModifies) -> JsResult<JsValue> {
         // let deserialized_modify: Vec<DisplayableModify> = serde_wasm_bindgen::from_value(modifies)?;
-        let deserialized_modify: Vec<DisplayableModify> = modifies.into();
+        let deserialized_modify: Vec<ModifyRequest> = modifies.into();
 
         let op = LdapOp::ModifyRequest(LdapModifyRequest {
             changes: deserialized_modify
