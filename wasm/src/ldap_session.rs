@@ -7,8 +7,11 @@ use futures_util::StreamExt;
 
 use ldap3_proto::{
     parse_ldap_filter_str,
-    proto::{LdapAddRequest, LdapBindCred, LdapBindRequest, LdapModify, LdapModifyRequest, LdapOp},
-    LdapCodec, LdapMsg, LdapSearchScope,
+    proto::{
+        LdapAddRequest, LdapBindCred, LdapBindRequest, LdapModify, LdapModifyRequest, LdapOp,
+        SaslCredentials,
+    },
+    LdapCodec, LdapMsg, LdapResultCode, LdapSearchScope,
 };
 
 use serde::{Deserialize, Serialize};
@@ -20,8 +23,9 @@ use wasm_bindgen::prelude::*;
 use ws_stream_wasm::WsStreamIo;
 
 use crate::{
-    error::JsErrorValue, modify::LdapModifies, replace_with_new_vec, return_msg_if_type_matches,
-    schema::displayables::DisplayableAttributes, search::LdapSearchStreamBuilder, send_message,
+    authentication::AuthProvier, error::JsErrorValue, modify::LdapModifies, replace_with_new_vec,
+    return_msg_if_type_matches, schema::displayables::DisplayableAttributes,
+    search::LdapSearchStreamBuilder, send_message,
 };
 use crate::{modify::DisplayableModify, search::LdapSearchResultStream};
 use crate::{to_js_error, JsResult};
@@ -298,8 +302,71 @@ impl LdapSession {
         Ok(())
     }
 
-    pub async fn ntlm_bind(&mut self, _username: String, _password: String) -> JsResult<JsValue> {
-        todo!()
+    pub async fn ntlm_bind(&mut self, username: String, password: String) -> JsResult<JsValue> {
+        let mut ntlm = AuthProvier::new(&username, &password);
+        let ntlm_token = ntlm.step(&[]).unwrap();
+
+        let msg = LdapMsg {
+            msgid: 1,
+            op: LdapOp::BindRequest(LdapBindRequest {
+                dn: "".to_string(),
+                cred: LdapBindCred::SASL(SaslCredentials {
+                    mechanism: "GSS-SPNEGO".to_string(),
+                    credentials: ntlm_token,
+                }),
+            }),
+            ctrl: vec![],
+        };
+
+        let mut frame = self.frame.lock().await;
+        frame.send(msg).await.map_err(|e| {
+            to_js_error!(
+                "Unable to send bind request -> {:?}, {:?}",
+                e,
+                e.to_string()
+            )
+        })?;
+        loop {
+            if let Some(Ok(msg)) = frame.next().await {
+                if let LdapOp::BindResponse(bind_response) = msg.op {
+                    match bind_response.res.code {
+                        LdapResultCode::Success => {
+                            println!("Bind successful");
+                            break Ok(serde_wasm_bindgen::to_value(&bind_response)?);
+                        }
+                        LdapResultCode::SaslBindInProgress => {
+                            if let Some(ref cred) = bind_response.saslcreds {
+                                let ntlm_token = ntlm.step(cred).unwrap();
+                                let msg = LdapMsg {
+                                    msgid: 2,
+                                    op: LdapOp::BindRequest(LdapBindRequest {
+                                        dn: "".to_string(),
+                                        cred: LdapBindCred::SASL(SaslCredentials {
+                                            mechanism: "GSS-SPNEGO".to_string(),
+                                            credentials: ntlm_token,
+                                        }),
+                                    }),
+                                    ctrl: vec![],
+                                };
+
+                                let _ = frame.send(msg).await.map_err(|e| {
+                                    to_js_error!(
+                                        "Unable to send bind request -> {:?}, {:?}",
+                                        e,
+                                        e.to_string()
+                                    )
+                                })?;
+                            }
+                        }
+                        _ => {
+                            panic!("Bind failed: {:?}", bind_response)
+                        }
+                    }
+                }
+            } else {
+                panic!("Unable to get bind response")
+            }
+        }
     }
 }
 
