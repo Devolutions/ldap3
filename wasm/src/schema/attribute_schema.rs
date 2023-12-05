@@ -219,48 +219,14 @@ impl LdapParser {
             | LdapSyntax::ObjectOrName
             | LdapSyntax::ObjectAccessPoint
             | LdapSyntax::ObjectPresentationAddress
-            | LdapSyntax::ObjectReplicaLink => LdapSyntax::bytes_arr_as_js_strings(bytes_arr),
-            LdapSyntax::StringGeneralizedTime => {
-                LdapSyntax::bytes_arr_as_js_date_generialized_time(bytes_arr)
-            }
+            | LdapSyntax::ObjectReplicaLink 
+            | LdapSyntax::Integer // this is funny, MSDoc says it is a 32 bit integer, but it is actually a string
+            | LdapSyntax::LargeInteger // so is this
+            | LdapSyntax::Enumeration
+            => LdapSyntax::bytes_arr_as_js_strings(bytes_arr),
+            LdapSyntax::StringGeneralizedTime => LdapSyntax::bytes_arr_as_js_date_generialized_time(bytes_arr),
             LdapSyntax::StringUtcTime => LdapSyntax::bytes_arr_to_date_utc(bytes_arr),
-            LdapSyntax::LargeInteger => {
-                let numbers = bytes_arr
-                    .into_iter()
-                    .map(|v| {
-                        let byte_arr: Result<[u8; 8], anyhow::Error> = v.try_into().map_err(|e| {
-                            anyhow::anyhow!("expecting a bytes arry of length 8, found {:?}", e)
-                        });
-                        byte_arr
-                    })
-                    .map(|res| {
-                        let byte_arr = res?;
-                        let value = i64::from_be_bytes(byte_arr);
-                        Ok(JsValue::from_f64(value as f64))
-                    })
-                    .collect::<Result<Vec<_>, anyhow::Error>>()?;
-                Ok(numbers)
-            }
-            LdapSyntax::Integer | LdapSyntax::Enumeration => {
-                let numbers = bytes_arr
-                    .into_iter()
-                    .map(|v| {
-                        let byte_arr: Result<[u8; 4], anyhow::Error> = v.try_into().map_err(|e| {
-                            anyhow::anyhow!("expecting a bytes arry of length 4, found {:?}", e)
-                        });
-                        byte_arr
-                    })
-                    .map(|res| {
-                        let byte_arr = res?;
-                        let value = i32::from_be_bytes(byte_arr);
-                        Ok(JsValue::from(value))
-                    })
-                    .collect::<Result<Vec<_>, anyhow::Error>>()?;
-                Ok(numbers)
-            }
-            LdapSyntax::StringOctet | LdapSyntax::ObjectDnBinary => {
-                LdapSyntax::bytes_arr_as_js_uint8arr(bytes_arr)
-            }
+            LdapSyntax::StringOctet | LdapSyntax::ObjectDnBinary => LdapSyntax::bytes_arr_as_js_uint8arr(bytes_arr),
             LdapSyntax::Boolean => {
                 let strings = LdapSyntax::bytes_arr_to_string(bytes_arr)?;
                 let res = strings
@@ -380,11 +346,4 @@ impl LdapSyntax {
 /*
 https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-adts/7cda533e-d7a4-4aec-a517-91d02ff4a1aa
 Each Syntax is identified by the combination of an OID and an OM syntax.
-
-In active directory, the integer syntax is restrcted to 32 bit integers. the large integer syntax is 64 bit integers.
-
-*/
-
-/*
- Ultimately, I want to give a function such that, given a attribute, and a oid and a om_syntax I shall be able to convert it to a DisplayableAttribute
 */
