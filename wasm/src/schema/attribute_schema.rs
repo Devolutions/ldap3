@@ -138,35 +138,35 @@ impl LdapSyntax {
         }
     }
 
-    pub(crate) fn from_om_syntax_to_vec(om_syntax: &str) -> Vec<LdapSyntax> {
-        match om_syntax {
-            "1" => vec![LdapSyntax::Boolean],
-            "10" => vec![LdapSyntax::Enumeration],
-            "2" => vec![LdapSyntax::Integer],
-            "65" => vec![LdapSyntax::LargeInteger],
-            "127" => vec![
-                LdapSyntax::ObjectAccessPoint,
-                LdapSyntax::ObjectDnString,
-                LdapSyntax::ObjectOrName,
-                LdapSyntax::ObjectDnBinary,
-                LdapSyntax::ObjectDsDn,
-                LdapSyntax::ObjectPresentationAddress,
-                LdapSyntax::ObjectReplicaLink,
-            ],
-            "27" => vec![LdapSyntax::StringCase],
-            "22" => vec![LdapSyntax::StringIa5],
-            "66" => vec![LdapSyntax::StringNtSecDesc],
-            "18" => vec![LdapSyntax::StringNumeric],
-            "6" => vec![LdapSyntax::StringObjectIdentifier],
-            "4" => vec![LdapSyntax::StringOctet],
-            "19" => vec![LdapSyntax::StringPrintable],
-            "20" => vec![LdapSyntax::StringTeletex],
-            "64" => vec![LdapSyntax::StringUnicode],
-            "23" => vec![LdapSyntax::StringUtcTime],
-            "24" => vec![LdapSyntax::StringGeneralizedTime],
-            _ => vec![],
-        }
-    }
+    // pub(crate) fn from_om_syntax_to_vec(om_syntax: &str) -> Vec<LdapSyntax> {
+    //     match om_syntax {
+    //         "1" => vec![LdapSyntax::Boolean],
+    //         "10" => vec![LdapSyntax::Enumeration],
+    //         "2" => vec![LdapSyntax::Integer],
+    //         "65" => vec![LdapSyntax::LargeInteger],
+    //         "127" => vec![
+    //             LdapSyntax::ObjectAccessPoint,
+    //             LdapSyntax::ObjectDnString,
+    //             LdapSyntax::ObjectOrName,
+    //             LdapSyntax::ObjectDnBinary,
+    //             LdapSyntax::ObjectDsDn,
+    //             LdapSyntax::ObjectPresentationAddress,
+    //             LdapSyntax::ObjectReplicaLink,
+    //         ],
+    //         "27" => vec![LdapSyntax::StringCase],
+    //         "22" => vec![LdapSyntax::StringIa5],
+    //         "66" => vec![LdapSyntax::StringNtSecDesc],
+    //         "18" => vec![LdapSyntax::StringNumeric],
+    //         "6" => vec![LdapSyntax::StringObjectIdentifier],
+    //         "4" => vec![LdapSyntax::StringOctet],
+    //         "19" => vec![LdapSyntax::StringPrintable],
+    //         "20" => vec![LdapSyntax::StringTeletex],
+    //         "64" => vec![LdapSyntax::StringUnicode],
+    //         "23" => vec![LdapSyntax::StringUtcTime],
+    //         "24" => vec![LdapSyntax::StringGeneralizedTime],
+    //         _ => vec![],
+    //     }
+    // }
 }
 
 #[wasm_bindgen]
