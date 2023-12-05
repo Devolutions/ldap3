@@ -1,4 +1,4 @@
-use anyhow::{Ok, Result};
+use anyhow::Result;
 use wasm_bindgen::prelude::*;
 
 use serde::{Deserialize, Serialize};
@@ -8,7 +8,6 @@ use tsify::Tsify;
 
 use crate::error::JsErrorValue;
 use crate::{to_js_error, JsResult};
-use crate::schema::search_objects::Attribute;
 use enum_assoc::Assoc;
 
 use super::search_objects::AttributeValue;
@@ -266,9 +265,9 @@ impl LdapSyntax {
             .into_iter()
             .map(|v| {
                 let uint8arr = js_sys::Uint8Array::from(v.as_slice());
-                Ok(JsValue::from(uint8arr))
+                JsValue::from(uint8arr)
             })
-            .collect::<Result<Vec<_>, _>>()?;
+            .collect::<Vec<_>>();
         Ok(uint8arr)
     }
 
@@ -345,3 +344,59 @@ impl LdapSyntax {
     }
 }
 
+#[wasm_bindgen]
+impl LdapParser {
+    pub fn to_string(attribute_value: AttributeValue) -> JsResult<Vec<String>> {
+        let bytes_arr:Vec<Vec<u8>> = attribute_value.into();
+        let strings = bytes_arr
+            .into_iter()
+            .map(|v| String::from_utf8(v).map_err(|e| anyhow::anyhow!("{:?}", e)))
+            .collect::<Result<Vec<_>, _>>().map_err(|e| to_js_error!("{:?}", e))?;
+        Ok(strings)
+    }
+
+    pub fn to_date(attribute_value: AttributeValue) -> JsResult<Vec<js_sys::Date>> {
+        let bytes_arr:Vec<Vec<u8>> = attribute_value.into();
+        let strings = bytes_arr
+            .into_iter()
+            .map(|v| String::from_utf8(v).map_err(|e| anyhow::anyhow!("{:?}", e)))
+            .collect::<Result<Vec<_>, _>>().map_err(|e| to_js_error!("{:?}", e))?;
+        let dates = strings
+            .into_iter()
+            .map(|s| LdapSyntax::string_to_js_date_generialized_time(s))
+            .collect::<Result<Vec<_>>>().map_err(|e| to_js_error!("{:?}", e))?;
+        Ok(dates)
+    }
+
+    pub fn to_uint_8_array(attribute_value: AttributeValue) -> JsResult<Vec<js_sys::Uint8Array>> {
+        let bytes_arr:Vec<Vec<u8>> = attribute_value.into();
+        let uint8arr = bytes_arr
+            .into_iter()
+            .map(|v| {
+                js_sys::Uint8Array::from(v.as_slice())
+            })
+            .collect::<Vec<_>>();
+        Ok(uint8arr)
+    }
+
+    pub fn to_boolean(attribute_value: AttributeValue) -> JsResult<JsBooleans> {
+        let bytes_arr:Vec<Vec<u8>> = attribute_value.into();
+        let res = bytes_arr
+            .into_iter()
+            .map(|v| String::from_utf8(v).map_err(|_| to_js_error!("Invalid UTF-8 bytes")))
+            .map(|v| Ok(v?=="TRUE"))
+            .collect::<Result<Vec<_>, JsValue>>()?;
+            
+        Ok(res.into())
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
+pub struct JsBooleans(pub(crate) Vec<bool>);
+
+impl From<Vec<bool>> for JsBooleans {
+    fn from(value: Vec<bool>) -> Self {
+        JsBooleans(value)
+    }
+}
