@@ -8,9 +8,10 @@ use tsify::Tsify;
 
 use crate::error::JsErrorValue;
 use crate::{to_js_error, JsResult};
-
-use super::search_objects::{AttibuteValues, Attribute};
+use crate::schema::search_objects::Attribute;
 use enum_assoc::Assoc;
+
+use super::search_objects::AttributeValue;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Assoc, Tsify)]
 #[tsify(into_wasm_abi, from_wasm_abi)]
@@ -182,7 +183,7 @@ impl LdapParser {
     pub fn parse_with_syntax_value(
         oid: String,
         om_syntax: String,
-        attribute_value: AttibuteValues,
+        attribute_value: AttributeValue,
     ) -> JsResult<Vec<JsValue>> {
         let syntax = LdapSyntax::from_oid_to_vec(&oid)
             .into_iter()
@@ -194,7 +195,7 @@ impl LdapParser {
 
     pub fn parse_value(
         syntax: LdapSyntax,
-        attribute_value: AttibuteValues,
+        attribute_value: AttributeValue,
     ) -> JsResult<Vec<JsValue>> {
         LdapParser::to_displayable_impl(syntax, attribute_value)
             .map_err(|e| to_js_error!("{:?}", e))
@@ -202,7 +203,7 @@ impl LdapParser {
 
     fn to_displayable_impl(
         syntax: LdapSyntax,
-        attribute_value: AttibuteValues,
+        attribute_value: AttributeValue,
     ) -> Result<Vec<JsValue>> {
         let bytes_arr = attribute_value.into();
         match syntax {
