@@ -14,11 +14,9 @@ use ldap3_proto::{
     LdapCodec, LdapMsg, LdapResultCode, LdapSearchScope,
 };
 
-use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use tokio_util::codec::Framed;
 
-use tsify::Tsify;
 use wasm_bindgen::prelude::*;
 use ws_stream_wasm::WsStreamIo;
 
@@ -226,37 +224,6 @@ impl LdapSession {
 
         let result = send_message!(self, msg);
         return_msg_if_type_matches!(LdapOp::CompareResult, result)
-    }
-}
-
-#[derive(Debug, Tsify, Serialize, Deserialize)]
-#[tsify(into_wasm_abi, from_wasm_abi)]
-pub struct LdapSyntaxIdentifierType {
-    oid: String,
-    om_syntax: String,
-}
-
-#[wasm_bindgen]
-pub struct LdapSyntaxIdentifier {
-    oid: String,
-    om_syntax: String,
-}
-
-impl LdapSyntaxIdentifier {
-    pub fn get_oid(&self) -> String {
-        self.oid.clone()
-    }
-
-    pub fn get_om_syntax(&self) -> String {
-        self.om_syntax.clone()
-    }
-
-    pub fn to_object(&self) -> JsValue {
-        let res = LdapSyntaxIdentifierType {
-            oid: self.oid.clone(),
-            om_syntax: self.om_syntax.clone(),
-        };
-        serde_wasm_bindgen::to_value(&res).unwrap()
     }
 }
 
