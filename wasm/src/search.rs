@@ -14,11 +14,11 @@ use wasm_bindgen::prelude::*;
 
 use crate::{
     call_js_function, call_js_function_serde,
-    schema::displayables::{DisplayableSearchMessage, DisplayableSearchOp},
+    schema::search_objects::{SearchMessage, SearchOperation},
     to_js_error, JsResult,
 };
 use crate::{error::JsErrorValue, ldap_session::LdapFrame};
-use crate::{ldap_session::JsLdapSearchScope, schema::displayables::DisplayableEntry};
+use crate::{ldap_session::JsLdapSearchScope, schema::search_objects::BinaryEntry};
 
 #[wasm_bindgen]
 pub struct LdapSearchResultStream {
@@ -68,18 +68,18 @@ impl LdapSearchResultStream {
                 let LdapMsg { op, ctrl, msgid } = response;
                 match op {
                     LdapOp::SearchResultEntry(entry) => {
-                        let message = DisplayableSearchMessage {
+                        let message = SearchMessage {
                             msgid,
-                            op: DisplayableSearchOp::SearchEntry(entry.into()),
+                            op: SearchOperation::SearchEntry(entry.into()),
                             ctrl: ctrl.into(),
                         };
                         call_js_function_serde!(callback_clone, message);
                     }
                     LdapOp::SearchResultReference(..) => continue,
                     LdapOp::SearchResultDone(msg) => {
-                        let message = DisplayableSearchMessage {
+                        let message = SearchMessage {
                             msgid,
-                            op: DisplayableSearchOp::SearchDone(msg),
+                            op: SearchOperation::SearchDone(msg),
                             ctrl: ctrl.into(),
                         };
                         info!("search is done, message = {:?}", message);

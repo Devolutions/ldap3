@@ -25,6 +25,6 @@ async fn test_derialize_modify() {
     )
     .expect("failed to parse json");
 
-    let _rust_modify: crate::modify::DisplayableModify =
+    let _rust_modify: crate::modify::ModifyRequest =
         serde_wasm_bindgen::from_value(js_modify).expect("failed to deserialize modify");
 }

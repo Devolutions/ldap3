@@ -2,13 +2,10 @@
 mod tests {
     use ldap3_proto::proto::{LdapControl, SyncRequestMode, SyncStateValue};
 
-    
-
     #[test]
     fn test_deser_to_ser_attribute() {
         let json = r#"{"attribute_name":"cn","attribute_value":{"type":"string","value":["test","test2"]}}"#;
-        let res: crate::schema::displayables::DisplayableAttribute =
-            serde_json::from_str(json).unwrap();
+        let res: crate::schema::search_objects::Attribute = serde_json::from_str(json).unwrap();
 
         let res = serde_json::to_string(&res).unwrap();
         print!("{}", res);
