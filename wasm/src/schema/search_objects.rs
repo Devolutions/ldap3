@@ -85,13 +85,13 @@ impl From<LdapSearchResultEntry> for SearchEntry {
 //==============================================================================
 #[derive(Debug, Serialize, Deserialize, Tsify)]
 #[tsify(into_wasm_abi, from_wasm_abi)]
+#[serde(rename_all = "snake_case")]
 pub enum SearchOperation {
     SearchEntry(SearchEntry),
     SearchReference(LdapResult),
     SearchDone(LdapResult),
 }
 
-//==============================================================================
 //==============================================================================
 #[derive(Debug, Serialize, Deserialize, Tsify)]
 #[tsify(into_wasm_abi, from_wasm_abi)]
