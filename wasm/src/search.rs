@@ -66,7 +66,7 @@ impl LdapSearchResultStream {
                     break Err(JsErrorValue::new("error in response").to_js_value());
                 }
                 let response = response.unwrap();
-                let LdapMsg { op, ctrl, msgid } = response;
+                let LdapMsg { op, ctrl: _, msgid } = response;
                 match op {
                     LdapOp::SearchResultEntry(entry) => {
                         let message = SearchMessage {

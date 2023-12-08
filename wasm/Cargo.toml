@@ -30,7 +30,6 @@ tokio = { workspace = true, features = ["io-util"] }
 futures-util = "0.3.29"
 serde.workspace = true
 wasm-bindgen-test = "0.3.38"
-reqwest = { version = "0.11.22" }
 serde_json.workspace = true
 tracing.workspace = true
 tracing-wasm = "0.2.1"
@@ -41,6 +40,8 @@ enum-assoc = "1.1.0"
 sspi.workspace = true
 regex = "1.10.2"
 getrandom = { version = "0.2.11", features = ["js"] }
-
+reqwest-wasm = "0.11.16"
+gloo-net = "0.5.0"
+time = { version = "0.3", features = ["wasm-bindgen"] }
 [dev-dependencies]
 uuid = "1.5.0"

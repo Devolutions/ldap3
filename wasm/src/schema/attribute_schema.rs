@@ -246,7 +246,7 @@ impl LdapSyntax {
         let strings = LdapSyntax::bytes_arr_to_string(bytes_arr)?;
         let dates = strings
             .into_iter()
-            .map(|s| LdapSyntax::string_to_js_date_generialized_time(s))
+            .map(LdapSyntax::string_to_js_date_generialized_time)
             .collect::<Result<Vec<_>>>()?
             .into_iter()
             .map(JsValue::from)
@@ -334,7 +334,7 @@ impl LdapParser {
             .collect::<Result<Vec<_>, _>>().map_err(|e| to_js_error!("{:?}", e))?;
         let dates = strings
             .into_iter()
-            .map(|s| LdapSyntax::string_to_js_date_generialized_time(s))
+            .map(LdapSyntax::string_to_js_date_generialized_time)
             .collect::<Result<Vec<_>>>().map_err(|e| to_js_error!("{:?}", e))?;
         Ok(dates)
     }
