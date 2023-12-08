@@ -337,6 +337,16 @@ impl LdapSession {
             }
         }
     }
+
+    pub async fn kerbero_bind(
+        &mut self,
+        username: String,
+        password: String,
+        domain: String,
+        kdc_proxy_url: String,
+    ) -> JsResult<JsValue> {
+        todo!()
+    }
 }
 
 //================================================================================================
