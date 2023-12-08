@@ -41,6 +41,7 @@ sspi.workspace = true
 regex = "1.10.2"
 getrandom = { version = "0.2.11", features = ["js"] }
 reqwest-wasm = "0.11.16"
+gloo-net = "0.5.0"
 
 [dev-dependencies]
 uuid = "1.5.0"

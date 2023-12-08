@@ -1,8 +1,10 @@
 use sspi::{
-    builders::EmptyInitializeSecurityContext, AuthIdentity, ClientRequestFlags, CredentialUse,
+    builders::EmptyInitializeSecurityContext, generator::NetworkRequest,
+    network_client::NetworkProtocol, AuthIdentity, ClientRequestFlags, CredentialUse,
     DataRepresentation, Kerberos, KerberosConfig, Ntlm, SecurityBuffer, SecurityBufferType,
-    SecurityStatus, Sspi, SspiImpl, Username, generator::NetworkRequest,
+    SecurityStatus, Sspi, SspiImpl, Username,
 };
+use tracing::debug;
 
 pub mod ntlm;
 
@@ -104,7 +106,10 @@ impl KerberoAuthProvier {
         }
     }
 
-    pub(crate) fn step(&mut self, input: &[u8]) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    pub(crate) async fn step(
+        &mut self,
+        input: &[u8],
+    ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
         let mut output_buffer = vec![SecurityBuffer::new(Vec::new(), SecurityBufferType::Token)];
 
         let mut input_buffer = vec![SecurityBuffer::new(
@@ -119,25 +124,22 @@ impl KerberoAuthProvier {
                 .with_target_name("ldap/ldapserver.domain.com")
                 .with_input(&mut input_buffer)
                 .with_output(&mut output_buffer);
-
+        let mut clinet = WasmNetworkClient;
         let result = {
             let mut generator = self.kerbero.initialize_security_context_impl(&mut builder);
-            let state = generator.start();
+            let mut state = generator.start();
 
-            match state {
-                sspi::generator::GeneratorState::Suspended(value) => {
-                    let NetworkRequest {
-                        data,
-                        protocol,
-                        url
-                    } = value;
+            loop {
+                match state {
+                    sspi::generator::GeneratorState::Suspended(req) => {
+                        let res = clinet.send(&req).await;
+                        state = generator.resume(Ok(res));
+                    }
+                    sspi::generator::GeneratorState::Completed(v) => break v,
                 }
-                sspi::generator::GeneratorState::Completed(_) => todo!(),
             }
+        }?;
 
-        }
-        
-            
         if [
             SecurityStatus::CompleteAndContinue,
             SecurityStatus::CompleteNeeded,
@@ -149,5 +151,33 @@ impl KerberoAuthProvier {
         }
 
         Ok(output_buffer[0].buffer.clone())
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct WasmNetworkClient;
+
+impl WasmNetworkClient {
+    async fn send<'a>(&mut self, network_request: &NetworkRequest) -> Vec<u8> {
+        debug!(?network_request.protocol, ?network_request.url);
+        match &network_request.protocol {
+            NetworkProtocol::Http | NetworkProtocol::Https => {
+                let body = js_sys::Uint8Array::from(&network_request.data[..]);
+
+                let response = gloo_net::http::Request::post(network_request.url.as_str())
+                    .header("keep-alive", "true")
+                    .body(body)
+                    .unwrap()
+                    .send()
+                    .await
+                    .unwrap()
+                    .binary()
+                    .await
+                    .unwrap();
+
+                response
+            }
+            unsupported => panic!("unsupported protocol: {:?}", unsupported),
+        }
     }
 }
