@@ -164,7 +164,9 @@ impl WasmNetworkClient {
             NetworkProtocol::Http | NetworkProtocol::Https => {
                 let body = js_sys::Uint8Array::from(&network_request.data[..]);
 
-                let response = gloo_net::http::Request::post(network_request.url.as_str())
+                
+
+                gloo_net::http::Request::post(network_request.url.as_str())
                     .header("keep-alive", "true")
                     .body(body)
                     .unwrap()
@@ -173,9 +175,7 @@ impl WasmNetworkClient {
                     .unwrap()
                     .binary()
                     .await
-                    .unwrap();
-
-                response
+                    .unwrap()
             }
             unsupported => panic!("unsupported protocol: {:?}", unsupported),
         }

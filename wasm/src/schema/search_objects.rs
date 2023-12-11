@@ -10,9 +10,9 @@ pub enum AttributeValue {
     String(Vec<String>),
 }
 
-impl Into<Vec<Vec<u8>>> for AttributeValue {
-    fn into(self) -> Vec<Vec<u8>> {
-        match self {
+impl From<AttributeValue> for Vec<Vec<u8>> {
+    fn from(val: AttributeValue) -> Self {
+        match val {
             AttributeValue::Bytes(bytes) => bytes,
             AttributeValue::String(strings) => {
                 strings.into_iter().map(|s| s.into_bytes()).collect()
@@ -35,11 +35,11 @@ pub struct Attribute {
     attribute_value: AttributeValue,
 }
 
-impl Into<LdapPartialAttribute> for Attribute {
-    fn into(self) -> LdapPartialAttribute {
+impl From<Attribute> for LdapPartialAttribute {
+    fn from(val: Attribute) -> Self {
         LdapPartialAttribute {
-            atype: self.attribute_name,
-            vals: self.attribute_value.into(),
+            atype: val.attribute_name,
+            vals: val.attribute_value.into(),
         }
     }
 }
@@ -59,9 +59,9 @@ impl From<LdapPartialAttribute> for Attribute {
 pub struct AttributesArray(pub(crate) Vec<Attribute>);
 
 // into Vec<LdapAttributes>
-impl Into<Vec<LdapPartialAttribute>> for AttributesArray {
-    fn into(self) -> Vec<LdapPartialAttribute> {
-        self.0.into_iter().map(|a| a.into()).collect()
+impl From<AttributesArray> for Vec<LdapPartialAttribute> {
+    fn from(val: AttributesArray) -> Self {
+        val.0.into_iter().map(|a| a.into()).collect()
     }
 }
 

@@ -318,7 +318,7 @@ impl LdapSession {
                                     ctrl: vec![],
                                 };
 
-                                let _ = frame.send(msg).await.map_err(|e| {
+                                frame.send(msg).await.map_err(|e| {
                                     to_js_error!(
                                         "Unable to send bind request -> {:?}, {:?}",
                                         e,
@@ -340,10 +340,10 @@ impl LdapSession {
 
     pub async fn kerbero_bind(
         &mut self,
-        username: String,
-        password: String,
-        domain: String,
-        kdc_proxy_url: String,
+        _username: String,
+        _password: String,
+        _domain: String,
+        _kdc_proxy_url: String,
     ) -> JsResult<JsValue> {
         todo!()
     }
