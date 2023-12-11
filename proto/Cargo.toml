@@ -27,6 +27,8 @@ tracing.workspace = true
 uuid.workspace = true
 serde = { workspace = true, optional = true }
 thiserror.workspace = true
+sspi = { workspace = true, features = ["network_client"] }
+reqwest = "0.11.22"
 
 [dev-dependencies]
 tracing-subscriber.workspace = true

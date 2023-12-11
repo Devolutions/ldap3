@@ -1,8 +1,16 @@
 use sspi::builders::EmptyInitializeSecurityContext;
+use sspi::generator;
+use sspi::generator::Generator;
+use sspi::generator::GeneratorInitSecurityContext;
+use sspi::generator::NetworkRequest;
+use sspi::network_client::NetworkClient;
 use sspi::AuthIdentity;
 use sspi::ClientRequestFlags;
 use sspi::CredentialUse;
 use sspi::DataRepresentation;
+use sspi::InitializeSecurityContextResult;
+use sspi::Kerberos;
+use sspi::KerberosConfig;
 use sspi::Ntlm;
 use sspi::SecurityBuffer;
 use sspi::SecurityBufferType;
@@ -42,8 +50,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut framed = Framed::new(tcpstream, LdapCodec::default());
 
-    let mut ntlm = AuthProvier::new(&ldap_username, &ldap_password);
-    let ntlm_token = ntlm.step(&[]).unwrap();
+    let mut kerberos = KerberoAuthProvier::new(
+        "Administrator@ad.it-help.ninja",
+        "DevoLabs123!",
+        "ad.it-help.ninja",
+        "tcp://IT-HELP-DC.ad.it-help.ninja:88",
+        "IT-HELP-DC.ad.it-help.ninja",
+    );
+
+    let token = kerberos.step(&[]).await.expect("failed to get token");
 
     let msg = LdapMsg {
         msgid: 1,
@@ -51,7 +66,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             dn: "".to_string(),
             cred: LdapBindCred::SASL(SaslCredentials {
                 mechanism: "GSS-SPNEGO".to_string(),
-                credentials: ntlm_token,
+                credentials: token,
             }),
         }),
         ctrl: vec![],
@@ -68,7 +83,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     LdapResultCode::SaslBindInProgress => {
                         if let Some(ref cred) = res.saslcreds {
-                            let ntlm_token = ntlm.step(cred).unwrap();
+                            let ntlm_token = kerberos.step(cred).await.unwrap();
                             let msg = LdapMsg {
                                 msgid: 2,
                                 op: LdapOp::BindRequest(LdapBindRequest {
@@ -136,7 +151,6 @@ impl AuthProvier {
                     ClientRequestFlags::CONFIDENTIALITY | ClientRequestFlags::ALLOCATE_MEMORY,
                 )
                 .with_target_data_representation(DataRepresentation::Native)
-                .with_target_name("ldap/ldapserver.domain.com")
                 .with_input(&mut input_buffer)
                 .with_output(&mut output_buffer);
 
@@ -156,5 +170,146 @@ impl AuthProvier {
         }
 
         Ok(output_buffer[0].buffer.clone())
+    }
+}
+
+pub(crate) struct KerberoAuthProvier {
+    kerbero: Kerberos,
+    credentials_handle: <Kerberos as SspiImpl>::CredentialsHandle,
+}
+
+impl KerberoAuthProvier {
+    // new func, takes username and password, domian ,kdc_proxy_url and returns Self
+    pub(crate) fn new(
+        ldap_username: &str,
+        ldap_password: &str,
+        _domain: &str,
+        kdc_proxy_url: &str,
+        client_computer_name: &str,
+    ) -> Self {
+        let identity = AuthIdentity {
+            username: Username::parse(ldap_username).unwrap(), // username@domain
+            password: ldap_password.to_string().into(),
+        };
+
+        let kerb_config = KerberosConfig::new(kdc_proxy_url, client_computer_name.to_string());
+
+        let mut kerbero = Kerberos::new_client_from_config(kerb_config).unwrap();
+
+        let acq_cred_result = kerbero
+            .acquire_credentials_handle()
+            .with_credential_use(CredentialUse::Outbound)
+            .with_auth_data(&identity.into())
+            .execute()
+            .unwrap();
+
+        Self {
+            kerbero,
+            credentials_handle: acq_cred_result.credentials_handle,
+        }
+    }
+
+    pub(crate) async fn step(
+        &mut self,
+        input: &[u8],
+    ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+        let mut output_buffer = vec![SecurityBuffer::new(Vec::new(), SecurityBufferType::Token)];
+
+        let mut input_buffer = vec![SecurityBuffer::new(
+            input.to_vec().clone(),
+            SecurityBufferType::Token,
+        )];
+        let mut builder =
+            EmptyInitializeSecurityContext::<<Kerberos as SspiImpl>::CredentialsHandle>::new()
+                .with_credentials_handle(&mut self.credentials_handle)
+                .with_context_requirements(
+                    ClientRequestFlags::ALLOCATE_MEMORY | ClientRequestFlags::MUTUAL_AUTH,
+                )
+                .with_target_data_representation(DataRepresentation::Native)
+                .with_target_name("LDAP/IT-HELP-DC.ad.it-help.ninja")
+                .with_input(&mut input_buffer)
+                .with_output(&mut output_buffer);
+
+        let generator = self.kerbero.initialize_security_context_impl(&mut builder);
+
+        let result = resolve_generator(generator)
+            .await
+            .expect("failed to get token");
+
+        if [
+            SecurityStatus::CompleteAndContinue,
+            SecurityStatus::CompleteNeeded,
+        ]
+        .contains(&result.status)
+        {
+            println!("Completing the token...");
+            self.kerbero.complete_auth_token(&mut output_buffer)?;
+        }
+
+        Ok(output_buffer[0].buffer.clone())
+    }
+}
+
+async fn resolve_generator<'a>(
+    mut generator: GeneratorInitSecurityContext<'a>,
+) -> Result<InitializeSecurityContextResult, Box<dyn std::error::Error>> {
+    let mut state = generator.start();
+    loop {
+        match state {
+            generator::GeneratorState::Suspended(req) => {
+                let res = send(&req).await.expect("failed to send request");
+                state = generator.resume(Ok(res));
+            }
+            generator::GeneratorState::Completed(v) => break v.map_err(|e| e.into()),
+        }
+    }
+}
+
+async fn send(req: &NetworkRequest) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    match req.protocol {
+        sspi::network_client::NetworkProtocol::Https
+        | sspi::network_client::NetworkProtocol::Http => {
+            let url = req.url.as_str();
+            let data = req.data.clone();
+
+            let client = reqwest::Client::new();
+            let res = client.post(url).body(data).send().await?;
+            let bytes_res = res.bytes().await?;
+            Ok(bytes_res.to_vec())
+        }
+        sspi::network_client::NetworkProtocol::Tcp => {
+            println!("tcp : {:?}", &req.url);
+            let addr = format!(
+                "{}:{}",
+                &req.url.host_str().unwrap_or_default(),
+                &req.url.port().unwrap_or(88)
+            );
+            let tcpstream = TcpStream::connect(addr).await?;
+            tcpstream.writable().await?;
+            tcpstream
+                .try_write(&req.data)
+                .expect("failed to write to tcp stream");
+
+            tcpstream.readable().await?;
+            let mut buf = vec![0; 8064];
+            let len = tcpstream.try_read(&mut buf)?;
+            buf.truncate(len);
+            Ok(buf)
+        }
+        sspi::network_client::NetworkProtocol::Udp => {
+            //same as tcp
+            let addr = SocketAddr::from_str(req.url.as_str()).expect("failed to parse url");
+            let udpsocket = tokio::net::UdpSocket::bind(addr).await?;
+            udpsocket.writable().await?;
+            udpsocket
+                .try_send(&req.data)
+                .expect("failed to write to udp socket");
+
+            udpsocket.readable().await?;
+            let mut buf = vec![0; 8064];
+            let len = udpsocket.try_recv(&mut buf)?;
+            buf.truncate(len);
+            Ok(buf)
+        }
     }
 }
