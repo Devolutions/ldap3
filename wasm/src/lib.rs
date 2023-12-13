@@ -7,7 +7,6 @@ pub mod ldap_session;
 pub mod modify;
 pub mod schema;
 pub mod search;
-pub mod sspi;
 #[cfg(test)]
 mod test;
 pub mod types;

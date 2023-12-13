@@ -1,3 +1,5 @@
+#![allow(non_snake_case)]
+// this is because Tsify and wasm-bindgen generates name in PascalCase, will look for solution later
 use core::panic;
 use std::sync::Arc;
 
@@ -21,9 +23,12 @@ use wasm_bindgen::prelude::*;
 use ws_stream_wasm::WsStreamIo;
 
 use crate::{
-    authentication::AuthProvier, error::JsErrorValue, modify::BinaryLdapModifies,
-    replace_with_new_vec, return_msg_if_type_matches, schema::search_objects::AttributesArray,
-    search::LdapSearchStreamBuilder, send_message,
+    error::JsErrorValue,
+    modify::BinaryLdapModifies,
+    replace_with_new_vec, return_msg_if_type_matches,
+    schema::search_objects::AttributesArray,
+    search::LdapSearchStreamBuilder,
+    send_message, authentication::{ntlm::NtlmAuthProvier, kerberos::KerberoAuthProvier},
 };
 use crate::{modify::ModifyRequest, search::LdapSearchResultStream};
 use crate::{to_js_error, JsResult};
@@ -272,7 +277,7 @@ impl LdapSession {
     }
 
     pub async fn ntlm_bind(&mut self, username: String, password: String) -> JsResult<JsValue> {
-        let mut ntlm = AuthProvier::new(&username, &password);
+        let mut ntlm = NtlmAuthProvier::new(&username, &password);
         let ntlm_token = ntlm.step(&[]).unwrap();
 
         let msg = LdapMsg {
@@ -340,12 +345,77 @@ impl LdapSession {
 
     pub async fn kerbero_bind(
         &mut self,
-        _username: String,
-        _password: String,
-        _domain: String,
-        _kdc_proxy_url: String,
+        username: String,
+        password: String,
+        domain: String,
+        kdc_proxy_url: String,
+        target: String,
     ) -> JsResult<JsValue> {
-        todo!()
+        let mut kerberos =
+            KerberoAuthProvier::new(&username, &password, &domain, &kdc_proxy_url, &target);
+        let ntlm_token = kerberos.step(&[]).await.unwrap();
+
+        let msg = LdapMsg {
+            msgid: 1,
+            op: LdapOp::BindRequest(LdapBindRequest {
+                dn: "".to_string(),
+                cred: LdapBindCred::SASL(SaslCredentials {
+                    mechanism: "GSS-SPNEGO".to_string(),
+                    credentials: ntlm_token,
+                }),
+            }),
+            ctrl: vec![],
+        };
+
+        let mut frame = self.frame.lock().await;
+        frame.send(msg).await.map_err(|e| {
+            to_js_error!(
+                "Unable to send bind request -> {:?}, {:?}",
+                e,
+                e.to_string()
+            )
+        })?;
+        loop {
+            if let Some(Ok(msg)) = frame.next().await {
+                if let LdapOp::BindResponse(bind_response) = msg.op {
+                    match bind_response.res.code {
+                        LdapResultCode::Success => {
+                            println!("Bind successful");
+                            break Ok(serde_wasm_bindgen::to_value(&bind_response)?);
+                        }
+                        LdapResultCode::SaslBindInProgress => {
+                            if let Some(ref cred) = bind_response.saslcreds {
+                                let ntlm_token = kerberos.step(cred).await.unwrap();
+                                let msg = LdapMsg {
+                                    msgid: 2,
+                                    op: LdapOp::BindRequest(LdapBindRequest {
+                                        dn: "".to_string(),
+                                        cred: LdapBindCred::SASL(SaslCredentials {
+                                            mechanism: "GSS-SPNEGO".to_string(),
+                                            credentials: ntlm_token,
+                                        }),
+                                    }),
+                                    ctrl: vec![],
+                                };
+
+                                frame.send(msg).await.map_err(|e| {
+                                    to_js_error!(
+                                        "Unable to send bind request -> {:?}, {:?}",
+                                        e,
+                                        e.to_string()
+                                    )
+                                })?;
+                            }
+                        }
+                        _ => {
+                            panic!("Bind failed: {:?}", bind_response)
+                        }
+                    }
+                }
+            } else {
+                panic!("Unable to get bind response")
+            }
+        }
     }
 }
 

@@ -1,9 +1,15 @@
+use futures_util::AsyncRead;
+use futures_util::AsyncReadExt;
+use ldap3_proto::parse_ldap_filter_str;
+use openssl::ssl::Ssl;
+use openssl::ssl::SslConnector;
+use openssl::ssl::SslMethod;
+use openssl::ssl::SslVerifyMode;
 use sspi::builders::EmptyInitializeSecurityContext;
 use sspi::generator;
-use sspi::generator::Generator;
 use sspi::generator::GeneratorInitSecurityContext;
 use sspi::generator::NetworkRequest;
-use sspi::network_client::NetworkClient;
+use sspi::negotiate;
 use sspi::AuthIdentity;
 use sspi::ClientRequestFlags;
 use sspi::CredentialUse;
@@ -11,6 +17,8 @@ use sspi::DataRepresentation;
 use sspi::InitializeSecurityContextResult;
 use sspi::Kerberos;
 use sspi::KerberosConfig;
+use sspi::Negotiate;
+use sspi::NegotiateConfig;
 use sspi::Ntlm;
 use sspi::SecurityBuffer;
 use sspi::SecurityBufferType;
@@ -20,8 +28,12 @@ use sspi::SspiImpl;
 use sspi::Username;
 use std::env;
 use std::net::SocketAddr;
+use std::pin::Pin;
 use std::str::FromStr;
+use tokio::io::AsyncWrite;
+use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
+use tokio_openssl::SslStream;
 use tokio_util::codec::Framed;
 use tracing::Level;
 
@@ -31,34 +43,95 @@ use futures_util::stream::StreamExt;
 use ldap3_proto::proto::*;
 use ldap3_proto::LdapCodec;
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let subs = tracing_subscriber::FmtSubscriber::builder()
-        .with_max_level(Level::DEBUG)
-        .finish();
-    tracing::subscriber::set_global_default(subs).expect("setting default subscriber failed");
+mod codec;
 
-    let ldap_password = env::var("LDAP_PASSWORD").unwrap(); // password
-    let ldap_server_addr = env::var("LDAP_SERVER_ADDR").unwrap(); // domain.com:port
-    let ldap_username = env::var("LDAP_USERNAME").unwrap(); // username@domain
+async fn get_tcp_frame() -> Framed<TcpStream, LdapCodec> where
+{
+    // let ldap_server_addr = env::var("LDAP_SERVER_ADDR").unwrap(); // domain.com:port
+    let ldap_server_addr = "10.10.0.3:389";
     let addr = SocketAddr::from_str(&ldap_server_addr).expect(&format!(
         "Unable to parse address, addr is {:?}",
         &ldap_server_addr
     ));
 
-    let tcpstream = TcpStream::connect(addr).await?;
+    let tcpstream = TcpStream::connect(addr).await.expect("failed to connect");
 
-    let mut framed = Framed::new(tcpstream, LdapCodec::default());
+    let framed = Framed::new(tcpstream, LdapCodec::default());
+    // let mut framed = Framed::new(tcpstream, LdapCodec);
+    return framed;
+}
 
-    let mut kerberos = KerberoAuthProvier::new(
+async fn get_tls_frame() -> Framed<SslStream<TcpStream>, LdapCodec> where
+{
+    let ldap_server_addr = "10.10.0.3:636";
+    let addr = SocketAddr::from_str(&ldap_server_addr).expect(&format!(
+        "Unable to parse address, addr is {:?}",
+        &ldap_server_addr
+    ));
+
+    let tcpstream = TcpStream::connect(addr).await.unwrap();
+
+    let mut tls_parms = SslConnector::builder(SslMethod::tls_client())
+        .map_err(|e| {
+            eprintln!("openssl -> {:?}", e);
+        })
+        .unwrap();
+    tls_parms.set_verify(SslVerifyMode::NONE);
+    let tls_parms = tls_parms.build();
+
+    let mut tlsstream = Ssl::new(tls_parms.context())
+        .and_then(|tls_obj| SslStream::new(tls_obj, tcpstream))
+        .map_err(|e| {
+            eprintln!("Failed to initialise TLS -> {:?}", e);
+        })
+        .unwrap();
+
+    let _ = SslStream::connect(Pin::new(&mut tlsstream))
+        .await
+        .map_err(|e| {
+            eprintln!("Failed to initialise TLS -> {:?}", e);
+        })
+        .unwrap();
+
+    let framed = Framed::new(tlsstream, LdapCodec::default());
+
+    return framed;
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let subs = tracing_subscriber::FmtSubscriber::builder()
+        .with_max_level(Level::DEBUG)
+        .finish();
+
+    tracing::subscriber::set_global_default(subs).expect("setting default subscriber failed");
+
+    // let mut framed = get_tcp_frame().await;
+    let mut framed = get_tls_frame().await;
+
+    let mut auth = NegotiateAuthProvier::new(
         "Administrator@ad.it-help.ninja",
         "DevoLabs123!",
         "ad.it-help.ninja",
         "tcp://IT-HELP-DC.ad.it-help.ninja:88",
         "IT-HELP-DC.ad.it-help.ninja",
     );
+    // let mut auth = KerberoAuthProvier::new(
+    //     "Administrator@ad.it-help.ninja",
+    //     "DevoLabs123!",
+    //     "ad.it-help.ninja",
+    //     "tcp://IT-HELP-DC.ad.it-help.ninja:88",
+    //     "IT-HELP-DC.ad.it-help.ninja",
+    // );
+        
 
-    let token = kerberos.step(&[]).await.expect("failed to get token");
+    /*
+       NOTE:TLS with NTLM NO-INTEGRITY is working
+            TLS with NTLM Confidentiality is not working with this example so far, it needs sasl encoding
+            TCP with NTLM NO-INTEGRITY is working
+    */
+    // let mut auth = AuthProvier::new("Administrator@ad.it-help.ninja", "DevoLabs123!");
+    let token = auth.step(&[]).await.expect("failed to get token");
 
     let msg = LdapMsg {
         msgid: 1,
@@ -72,18 +145,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ctrl: vec![],
     };
 
-    framed.send(msg).await?;
+    framed.send(msg).await.expect("failed to send bind request");
     loop {
         if let Some(Ok(msg)) = framed.next().await {
             if let LdapOp::BindResponse(res) = msg.op {
                 match res.res.code {
                     LdapResultCode::Success => {
                         println!("Bind successful");
-                        break Ok(());
+                        break;
                     }
                     LdapResultCode::SaslBindInProgress => {
                         if let Some(ref cred) = res.saslcreds {
-                            let ntlm_token = kerberos.step(cred).await.unwrap();
+                            let ntlm_token = auth.step(cred).await.unwrap();
                             let msg = LdapMsg {
                                 msgid: 2,
                                 op: LdapOp::BindRequest(LdapBindRequest {
@@ -105,9 +178,39 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         } else {
-            panic!("Unable to get bind response")
+            panic!("Unable to get bind response, or server actively closed connection")
         }
     }
+
+    // search for all users
+    let msg = LdapMsg {
+        msgid: 3,
+        op: LdapOp::SearchRequest(LdapSearchRequest {
+            base: "dc=ad,dc=it-help,dc=ninja".to_string(),
+            scope: LdapSearchScope::Subtree,
+            sizelimit: 0,
+            timelimit: 0,
+            typesonly: false,
+            filter: parse_ldap_filter_str("(objectClass=*)").unwrap(),
+            attrs: vec![],
+            aliases: LdapDerefAliases::Never,
+        }),
+        ctrl: vec![],
+    };
+
+    framed.send(msg).await?;
+
+    loop {
+        if let Some(Ok(msg)) = framed.next().await {
+            if let LdapOp::SearchResultEntry(res) = msg.op {
+                println!("Entry: {:?}", res);
+            }
+        } else {
+            break;
+        }
+    }
+
+    Ok(())
 }
 
 struct AuthProvier {
@@ -137,7 +240,7 @@ impl AuthProvier {
         }
     }
 
-    fn step(&mut self, input: &[u8]) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    async fn step(&mut self, input: &[u8]) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
         let mut output_buffer = vec![SecurityBuffer::new(Vec::new(), SecurityBufferType::Token)];
 
         let mut input_buffer = vec![SecurityBuffer::new(
@@ -171,6 +274,89 @@ impl AuthProvier {
 
         Ok(output_buffer[0].buffer.clone())
     }
+}
+
+pub(crate) struct NegotiateAuthProvier {
+    negotiate: Negotiate,
+    credentials_handle: <Negotiate as SspiImpl>::CredentialsHandle,
+}
+
+impl NegotiateAuthProvier {
+    pub(crate) fn new(
+        ldap_username: &str,
+        ldap_password: &str,
+        domain: &str,
+        kdc_proxy_url: &str,
+        client_computer_name: &str,
+    ) -> Self {
+        let identity = AuthIdentity {
+            username: Username::parse(ldap_username).unwrap(),
+            password: ldap_password.to_string().into(),
+        };
+
+        let krb_config = KerberosConfig::new(kdc_proxy_url, client_computer_name.to_string());
+        let negotiate_config = NegotiateConfig::from_protocol_config(
+            Box::new(krb_config),
+            client_computer_name.to_string(),
+        );
+
+        let mut negotiate = Negotiate::new(negotiate_config).expect("failed to create negotiate");
+
+        let acq_cred_result = negotiate
+            .acquire_credentials_handle()
+            .with_credential_use(CredentialUse::Outbound)
+            .with_auth_data(&identity.into())
+            .execute()
+            .unwrap();
+
+        Self {
+            negotiate,
+            credentials_handle: acq_cred_result.credentials_handle,
+        }
+    }
+
+    pub(crate) async fn step(
+        &mut self,
+        input: &[u8],
+    ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+        let mut output_buffer = vec![SecurityBuffer::new(Vec::new(), SecurityBufferType::Token)];
+
+        let mut input_buffer = vec![SecurityBuffer::new(
+            input.to_vec().clone(),
+            SecurityBufferType::Token,
+        )];
+        let mut builder =
+            EmptyInitializeSecurityContext::<<Negotiate as SspiImpl>::CredentialsHandle>::new()
+                .with_credentials_handle(&mut self.credentials_handle)
+                .with_context_requirements(
+                    ClientRequestFlags::ALLOCATE_MEMORY
+                        | ClientRequestFlags::MUTUAL_AUTH
+                        | ClientRequestFlags::REPLAY_DETECT,
+                )
+                .with_target_data_representation(DataRepresentation::Native)
+                .with_target_name("LDAP/IT-HELP-DC.ad.it-help.ninja")
+                .with_input(&mut input_buffer)
+                .with_output(&mut output_buffer);
+
+        let generator = self.negotiate.initialize_security_context_impl(&mut builder);
+
+        let result = resolve_generator(generator)
+            .await
+            .expect("failed to get token");
+
+        if [
+            SecurityStatus::CompleteAndContinue,
+            SecurityStatus::CompleteNeeded,
+        ]
+        .contains(&result.status)
+        {
+            println!("Completing the token...");
+            self.negotiate.complete_auth_token(&mut output_buffer)?;
+        }
+
+        Ok(output_buffer[0].buffer.clone())
+    }
+
 }
 
 pub(crate) struct KerberoAuthProvier {
@@ -223,7 +409,9 @@ impl KerberoAuthProvier {
             EmptyInitializeSecurityContext::<<Kerberos as SspiImpl>::CredentialsHandle>::new()
                 .with_credentials_handle(&mut self.credentials_handle)
                 .with_context_requirements(
-                    ClientRequestFlags::ALLOCATE_MEMORY | ClientRequestFlags::MUTUAL_AUTH,
+                    ClientRequestFlags::ALLOCATE_MEMORY
+                        | ClientRequestFlags::MUTUAL_AUTH
+                        | ClientRequestFlags::REPLAY_DETECT,
                 )
                 .with_target_data_representation(DataRepresentation::Native)
                 .with_target_name("LDAP/IT-HELP-DC.ad.it-help.ninja")
