@@ -12,7 +12,7 @@ macro_rules! sync_state_enum_convert {
                 }
             }
         }
-
+        
         impl Into<$source> for $target {
             fn into(self) -> $source {
                 match self {
