@@ -1,12 +1,13 @@
 use core::fmt;
 
 use serde::{Deserialize, Serialize};
+use tsify::Tsify;
 use wasm_bindgen::prelude::*;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[wasm_bindgen]
+#[derive(Debug, Clone, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 pub struct JsErrorValue {
-    error: String,
+    pub error: String,
 }
 
 #[macro_export]

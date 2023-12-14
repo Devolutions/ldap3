@@ -2,6 +2,8 @@ use ldap3_proto::{proto::LdapResult, LdapPartialAttribute, LdapSearchResultEntry
 use serde::{Deserialize, Serialize};
 use tsify::Tsify;
 
+use crate::control::LdapControlArray;
+
 #[derive(Debug, Serialize, Deserialize, Tsify)]
 #[serde(untagged)]
 #[tsify(into_wasm_abi, from_wasm_abi)]
@@ -98,4 +100,5 @@ pub enum SearchOperation {
 pub struct SearchMessage {
     pub msgid: i32,
     pub op: SearchOperation,
+    pub ctrl: Option<LdapControlArray>,
 }

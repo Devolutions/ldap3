@@ -4,6 +4,7 @@ use futures_util::sink::SinkExt;
 use futures_util::StreamExt;
 use js_sys::Function;
 use ldap3_proto::{
+    control::LdapControl,
     proto::{LdapOp, LdapSearchRequest},
     LdapFilter, LdapMsg,
 };
@@ -71,6 +72,7 @@ impl LdapSearchResultStream {
                         let message = SearchMessage {
                             msgid,
                             op: SearchOperation::SearchEntry(entry.into()),
+                            ctrl: Some(ctrl.into()),
                         };
                         call_js_function_serde!(callback_clone, message);
                     }
@@ -79,6 +81,7 @@ impl LdapSearchResultStream {
                         let message = SearchMessage {
                             msgid,
                             op: SearchOperation::SearchDone(msg),
+                            ctrl: Some(ctrl.into()),
                         };
                         info!("search is done, message = {:?}", message);
                         break Ok(call_js_function_serde!(callback_clone, message));
@@ -111,6 +114,7 @@ impl LdapSearchResultStream {
 impl LdapSearchStreamBuilder {
     pub fn build(self) -> JsResult<LdapSearchResultStream> {
         let LdapSearchStreamBuilder {
+            controls,
             frame,
             search_base,
             scope,
@@ -135,7 +139,7 @@ impl LdapSearchStreamBuilder {
         let msg = LdapMsg {
             msgid: message_id.ok_or_else(|| to_js_error!("Message id not set"))?,
             op: LdapOp::SearchRequest(request),
-            ctrl: vec![],
+            ctrl: controls.unwrap_or_default(),
         };
 
         Ok(LdapSearchResultStream::new(
@@ -147,6 +151,7 @@ impl LdapSearchStreamBuilder {
 
 #[derive(Default)]
 pub struct LdapSearchStreamBuilder {
+    controls: Option<Vec<LdapControl>>,
     frame: Option<Arc<Mutex<LdapFrame>>>,
     search_base: Option<String>,
     filter: Option<LdapFilter>,
@@ -195,6 +200,11 @@ impl LdapSearchStreamBuilder {
 
     pub fn attributes(mut self, attributes: Vec<String>) -> Self {
         self.attributes = Some(attributes);
+        self
+    }
+
+    pub fn controls(mut self, controls: Vec<LdapControl>) -> Self {
+        self.controls = Some(controls);
         self
     }
 }

@@ -1,6 +1,9 @@
 #[cfg(test)]
 mod tests {
-    use ldap3_proto::proto::{LdapControl, SyncRequestMode, SyncStateValue};
+    use ldap3_proto::{
+        control::LdapControl,
+        proto::{SyncRequestMode, SyncStateValue},
+    };
 
     #[test]
     fn test_deser_to_ser_attribute() {

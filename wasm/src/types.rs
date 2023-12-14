@@ -2,18 +2,7 @@ use wasm_bindgen::prelude::wasm_bindgen;
 
 #[wasm_bindgen(typescript_custom_section)]
 const s: &'static str = r#"
-export type SyncRequestMode = 'refresh_only' | 'refresh_and_persist';
-export type SyncStateValue = 'present' | 'add' | 'modify' | 'delete';
-
 export type Uuid = string; // Assuming Uuid is a string
-
-export type LdapControl = 
-    | { type: 'sync_request', criticality: boolean, mode: SyncRequestMode, cookie?: Uint8Array, reload_hint: boolean }
-    | { type: 'sync_state', state: SyncStateValue, entry_uuid: Uuid, cookie?: Uint8Array }
-    | { type: 'sync_done', cookie?: Uint8Array, refresh_deletes: boolean }
-    | { type: 'ad_dirsync', flags: number, max_bytes: number, cookie?: Uint8Array }
-    | { type: 'simple_paged_results', size: number, cookie: Uint8Array }
-    | { type: 'manage_dsa_it', criticality: boolean };
 
     type LdapSearchResultReference = {
         uris: string[];
