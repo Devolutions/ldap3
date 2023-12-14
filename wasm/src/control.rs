@@ -163,9 +163,9 @@ impl From<ldap3_proto::control::LdapControl> for LdapControl {
     }
 }
 
-impl Into<ldap3_proto::control::LdapControl> for LdapControl {
-    fn into(self) -> ldap3_proto::control::LdapControl {
-        match self {
+impl From<LdapControl> for ldap3_proto::control::LdapControl {
+    fn from(val: LdapControl) -> Self {
+        match val {
             LdapControl::SyncRequest {
                 criticality,
                 mode,
@@ -239,11 +239,11 @@ impl From<ldap3_proto::control::ServerSortResult> for ServerSortResult {
     }
 }
 
-impl Into<ldap3_proto::control::ServerSortResult> for ServerSortResult {
-    fn into(self) -> ldap3_proto::control::ServerSortResult {
+impl From<ServerSortResult> for ldap3_proto::control::ServerSortResult {
+    fn from(val: ServerSortResult) -> Self {
         ldap3_proto::control::ServerSortResult {
-            result_code: self.result_code.into(),
-            attribute_type: self.attribute_type,
+            result_code: val.result_code.into(),
+            attribute_type: val.attribute_type,
         }
     }
 }
@@ -366,12 +366,12 @@ impl From<ldap3_proto::control::ServerSortRequet> for ServerSortRequet {
     }
 }
 
-impl Into<ldap3_proto::control::ServerSortRequet> for ServerSortRequet {
-    fn into(self) -> ldap3_proto::control::ServerSortRequet {
+impl From<ServerSortRequet> for ldap3_proto::control::ServerSortRequet {
+    fn from(val: ServerSortRequet) -> Self {
         ldap3_proto::control::ServerSortRequet {
-            attribute_name: self.attribute_name,
-            ordering_rule: self.ordering_rule,
-            reverse_order: self.reverse_order,
+            attribute_name: val.attribute_name,
+            ordering_rule: val.ordering_rule,
+            reverse_order: val.reverse_order,
         }
     }
 }
@@ -381,9 +381,9 @@ impl Into<ldap3_proto::control::ServerSortRequet> for ServerSortRequet {
 #[tsify(into_wasm_abi, from_wasm_abi)]
 pub struct LdapControlArray(pub Vec<LdapControl>);
 
-impl Into<Vec<ldap3_proto::control::LdapControl>> for LdapControlArray {
-    fn into(self) -> Vec<ldap3_proto::control::LdapControl> {
-        self.0.into_iter().map(|v| v.into()).collect()
+impl From<LdapControlArray> for Vec<ldap3_proto::control::LdapControl> {
+    fn from(val: LdapControlArray) -> Self {
+        val.0.into_iter().map(|v| v.into()).collect()
     }
 }
 

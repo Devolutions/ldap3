@@ -2,7 +2,7 @@
 // this is because Tsify and wasm-bindgen generates name in PascalCase, will look for solution later
 use core::panic;
 use std::sync::Arc;
-
+use crate::error::JsErrorValue;
 use async_io_stream::IoStream;
 use futures_util::sink::SinkExt;
 use futures_util::StreamExt;
@@ -11,28 +11,20 @@ use ldap3_proto::{
     parse_ldap_filter_str,
     proto::{
         LdapAddRequest, LdapBindCred, LdapBindRequest, LdapModify, LdapModifyRequest, LdapOp,
-        SaslCredentials,
     },
-    LdapCodec, LdapMsg, LdapResultCode, LdapSearchScope,
+    LdapCodec, LdapMsg, LdapSearchScope,
 };
 
 use serde::{Serialize, Deserialize};
 use tokio::sync::Mutex;
 use tokio_util::codec::Framed;
 
+use tracing::trace;
 use tsify::Tsify;
 use wasm_bindgen::prelude::*;
 use ws_stream_wasm::WsStreamIo;
 
-use crate::{
-    error::JsErrorValue,
-    modify::BinaryLdapModifies,
-    replace_with_new_vec, return_msg_if_type_matches,
-    schema::search_objects::AttributesArray,
-    search::LdapSearchStreamBuilder,
-    send_message, authentication::{ntlm::NtlmAuthProvier, kerberos::KerberoAuthProvier, SecurityProvider},
-};
-use crate::{modify::ModifyRequest, search::LdapSearchResultStream};
+use crate::{modify::ModifyRequest, search::{LdapSearchResultStream, LdapSearchStreamBuilder}, control::LdapControlArray, schema::search_objects::AttributesArray, send_message, return_msg_if_type_matches};
 use crate::{to_js_error, JsResult};
 
 pub(crate) type LdapFrame = Framed<IoStream<WsStreamIo, Vec<u8>>, LdapCodec>;
@@ -40,8 +32,7 @@ pub(crate) type LdapFrame = Framed<IoStream<WsStreamIo, Vec<u8>>, LdapCodec>;
 pub struct LdapSession {
     frame: Arc<Mutex<LdapFrame>>,
     message_id: i32,
-    control: Vec<ldap3_proto::proto::LdapControl>,
-    _parameters: LdapSessionParameters,
+    parameters: LdapSessionParameters,
 }
 
 #[wasm_bindgen]
@@ -77,8 +68,8 @@ impl LdapSession {
 
 Note: for those who wonder why I write code this way, Is because until today, 2023,Dec, it is still very hard to have a typed value and struct to pass
     from and into Typescript.
-    1. I want to preserve the type information of the struct, so I can use it in Typescript
-    2. I want to automatically serialize and deserialize the struct, so I can pass it from and into Typescript
+    1. I want to preserve the type information of the struct, so I can use it in Typescript, in a type safe manner
+    2. I want to automatically serialize and deserialize the struct
 
 */
 #[wasm_bindgen]
@@ -94,22 +85,11 @@ impl LdapSession {
         let session = LdapSession {
             frame: Arc::new(Mutex::new(framed)),
             message_id: 0,
-            control: vec![],
-            _parameters: params,
+            parameters: params,
         };
         Ok(session)
     }
 
-    pub fn add_control_for_next_request(&mut self, control: JsValue) -> JsResult<()> {
-        let control: Vec<ldap3_proto::proto::LdapControl> =
-            serde_wasm_bindgen::from_value(control)?;
-        self.control.extend(control);
-        Ok(())
-    }
-
-    /*
-    Important: looks like the wildcard filter is broken, further investigation required
-     */
     pub fn search(
         &mut self,
         search_base: String,
@@ -118,10 +98,11 @@ impl LdapSession {
         attributes: Vec<String>,
         size_limit: Option<i32>,
         time_limit: Option<i32>,
+        controls: Option<LdapControlArray>,
     ) -> JsResult<LdapSearchResultStream> {
         let filter =
             parse_ldap_filter_str(&filter).map_err(|e| to_js_error!("Invalid filter : {:?}", e))?;
-
+        trace!(?filter, ?attributes, ?controls);
         let builder = LdapSearchStreamBuilder::default()
             .frame(self.frame.clone())
             .search_base(search_base)
@@ -130,12 +111,18 @@ impl LdapSession {
             .size_limit(size_limit)
             .time_limit(time_limit)
             .message_id(self.next_message_id())
-            .attributes(attributes);
+            .attributes(attributes)
+            .controls(controls.unwrap_or_default().into());
 
         builder.build()
     }
 
-    pub async fn add(&mut self, dn: String, attributes: AttributesArray) -> JsResult<JsValue> {
+    pub async fn add(
+        &mut self,
+        dn: String,
+        attributes: AttributesArray,
+        controls: Option<LdapControlArray>,
+    ) -> JsResult<JsValue> {
         let request = LdapAddRequest {
             dn,
             attributes: attributes.into(),
@@ -144,7 +131,7 @@ impl LdapSession {
         let msg = LdapMsg {
             msgid: self.next_message_id(),
             op: LdapOp::AddRequest(request),
-            ctrl: replace_with_new_vec!(&mut self.control),
+            ctrl: controls.unwrap_or_default().into(),
         };
 
         let res = send_message!(self, msg);
@@ -152,11 +139,15 @@ impl LdapSession {
         return_msg_if_type_matches!(LdapOp::AddResponse, res)
     }
 
-    pub async fn delete(&mut self, dn: String) -> JsResult<JsValue> {
+    pub async fn delete(
+        &mut self,
+        dn: String,
+        controls: Option<LdapControlArray>,
+    ) -> JsResult<JsValue> {
         let msg = LdapMsg {
             msgid: self.next_message_id(),
             op: LdapOp::DelRequest(dn),
-            ctrl: replace_with_new_vec!(&mut self.control),
+            ctrl: controls.unwrap_or_default().into(),
         };
 
         let res = send_message!(self, msg);
@@ -170,6 +161,7 @@ impl LdapSession {
         newrdn: String,
         delete_old_rdn: bool,
         new_superior: Option<String>,
+        controls: Option<LdapControlArray>,
     ) -> JsResult<JsValue> {
         let msg = LdapMsg {
             msgid: self.next_message_id(),
@@ -179,7 +171,7 @@ impl LdapSession {
                 deleteoldrdn: delete_old_rdn,
                 new_superior,
             }),
-            ctrl: replace_with_new_vec!(&mut self.control),
+            ctrl: controls.unwrap_or_default().into(),
         };
 
         let result = send_message!(self, msg);
@@ -188,8 +180,12 @@ impl LdapSession {
     }
 
     /// modify is of type LdapModify[]
-    pub async fn modify(&mut self, dn: String, modifies: BinaryLdapModifies) -> JsResult<JsValue> {
-        // let deserialized_modify: Vec<DisplayableModify> = serde_wasm_bindgen::from_value(modifies)?;
+    pub async fn modify(
+        &mut self,
+        dn: String,
+        modifies: crate::modify::BinaryLdapModifies,
+        controls: Option<LdapControlArray>,
+    ) -> JsResult<JsValue> {
         let deserialized_modify: Vec<ModifyRequest> = modifies.into();
 
         let op = LdapOp::ModifyRequest(LdapModifyRequest {
@@ -206,7 +202,7 @@ impl LdapSession {
         let msg = LdapMsg {
             msgid: self.next_message_id(),
             op,
-            ctrl: replace_with_new_vec!(&mut self.control),
+            ctrl: controls.unwrap_or_default().into(),
         };
 
         let result = send_message!(self, msg);
@@ -218,6 +214,7 @@ impl LdapSession {
         dn: String,
         attribute: String,
         value: String,
+        controls: Option<LdapControlArray>,
     ) -> JsResult<JsValue> {
         let msg = LdapMsg {
             msgid: self.next_message_id(),
@@ -226,7 +223,7 @@ impl LdapSession {
                 atype: attribute,
                 val: value.as_bytes().to_vec(),
             }),
-            ctrl: replace_with_new_vec!(&mut self.control),
+            ctrl: controls.unwrap_or_default().into(),
         };
 
         let result = send_message!(self, msg);
@@ -240,6 +237,7 @@ impl LdapSession {
         &mut self,
         distinguished_name: String,
         password: String,
+        controls: Option<LdapControlArray>,
     ) -> JsResult<JsValue> {
         let msg = LdapMsg {
             msgid: self.next_message_id(),
@@ -247,7 +245,7 @@ impl LdapSession {
                 dn: distinguished_name,
                 cred: LdapBindCred::Simple(password),
             }),
-            ctrl: replace_with_new_vec!(&mut self.control),
+            ctrl: controls.unwrap_or_default().into(),
         };
 
         let res = send_message!(self, msg);
@@ -262,11 +260,11 @@ impl LdapSession {
         }
     }
 
-    pub async fn unbind(&mut self) -> JsResult<()> {
+    pub async fn unbind(&mut self, control: Option<LdapControlArray>) -> JsResult<()> {
         let msg = LdapMsg {
             msgid: self.next_message_id(),
             op: LdapOp::UnbindRequest,
-            ctrl: replace_with_new_vec!(&mut self.control),
+            ctrl: control.unwrap_or_default().into(),
         };
 
         self.frame
@@ -278,148 +276,155 @@ impl LdapSession {
         Ok(())
     }
 
-    pub async fn ntlm_bind(&mut self, username: String, password: String) -> JsResult<JsValue> {
-        let mut ntlm = NtlmAuthProvier::new(&username, &password);
-        let ntlm_token = ntlm.step(&[]).await.unwrap();
+    // pub async fn ntlm_bind(
+    //     &mut self,
+    //     username: String,
+    //     password: String,
+    //     control: Option<LdapControlArray>,
+    // ) -> JsResult<JsValue> {
+    //     let mut ntlm = NtlmAuthProvier::new(&username, &password);
+    //     let ntlm_token = ntlm.step(&[]).await.unwrap();
 
-        let msg = LdapMsg {
-            msgid: 1,
-            op: LdapOp::BindRequest(LdapBindRequest {
-                dn: "".to_string(),
-                cred: LdapBindCred::SASL(SaslCredentials {
-                    mechanism: "GSS-SPNEGO".to_string(),
-                    credentials: ntlm_token,
-                }),
-            }),
-            ctrl: vec![],
-        };
+    //     let msg = LdapMsg {
+    //         msgid: 1,
+    //         op: LdapOp::BindRequest(LdapBindRequest {
+    //             dn: "".to_string(),
+    //             cred: LdapBindCred::SASL(SaslCredentials {
+    //                 mechanism: "GSS-SPNEGO".to_string(),
+    //                 credentials: ntlm_token,
+    //             }),
+    //         }),
+    //         ctrl: control.unwrap_or_default().into(),
+    //     };
 
-        let mut frame = self.frame.lock().await;
-        frame.send(msg).await.map_err(|e| {
-            to_js_error!(
-                "Unable to send bind request -> {:?}, {:?}",
-                e,
-                e.to_string()
-            )
-        })?;
-        loop {
-            if let Some(Ok(msg)) = frame.next().await {
-                if let LdapOp::BindResponse(bind_response) = msg.op {
-                    match bind_response.res.code {
-                        LdapResultCode::Success => {
-                            println!("Bind successful");
-                            break Ok(serde_wasm_bindgen::to_value(&bind_response)?);
-                        }
-                        LdapResultCode::SaslBindInProgress => {
-                            if let Some(ref cred) = bind_response.saslcreds {
-                                let ntlm_token = ntlm.step(cred).await.unwrap();
-                                let msg = LdapMsg {
-                                    msgid: 2,
-                                    op: LdapOp::BindRequest(LdapBindRequest {
-                                        dn: "".to_string(),
-                                        cred: LdapBindCred::SASL(SaslCredentials {
-                                            mechanism: "GSS-SPNEGO".to_string(),
-                                            credentials: ntlm_token,
-                                        }),
-                                    }),
-                                    ctrl: vec![],
-                                };
+    //     let mut frame = self.frame.lock().await;
+    //     frame.send(msg).await.map_err(|e| {
+    //         to_js_error!(
+    //             "Unable to send bind request -> {:?}, {:?}",
+    //             e,
+    //             e.to_string()
+    //         )
+    //     })?;
+    //     loop {
+    //         if let Some(Ok(msg)) = frame.next().await {
+    //             if let LdapOp::BindResponse(bind_response) = msg.op {
+    //                 match bind_response.res.code {
+    //                     LdapResultCode::Success => {
+    //                         println!("Bind successful");
+    //                         break Ok(serde_wasm_bindgen::to_value(&bind_response)?);
+    //                     }
+    //                     LdapResultCode::SaslBindInProgress => {
+    //                         if let Some(ref cred) = bind_response.saslcreds {
+    //                             let ntlm_token = ntlm.step(cred).await.unwrap();
+    //                             let msg = LdapMsg {
+    //                                 msgid: 2,
+    //                                 op: LdapOp::BindRequest(LdapBindRequest {
+    //                                     dn: "".to_string(),
+    //                                     cred: LdapBindCred::SASL(SaslCredentials {
+    //                                         mechanism: "GSS-SPNEGO".to_string(),
+    //                                         credentials: ntlm_token,
+    //                                     }),
+    //                                 }),
+    //                                 ctrl: vec![],
+    //                             };
 
-                                frame.send(msg).await.map_err(|e| {
-                                    to_js_error!(
-                                        "Unable to send bind request -> {:?}, {:?}",
-                                        e,
-                                        e.to_string()
-                                    )
-                                })?;
-                            }
-                        }
-                        _ => {
-                            panic!("Bind failed: {:?}", bind_response)
-                        }
-                    }
-                }
-            } else {
-                panic!("Unable to get bind response")
-            }
-        }
-    }
+    //                             frame.send(msg).await.map_err(|e| {
+    //                                 to_js_error!(
+    //                                     "Unable to send bind request -> {:?}, {:?}",
+    //                                     e,
+    //                                     e.to_string()
+    //                                 )
+    //                             })?;
+    //                         }
+    //                     }
+    //                     _ => {
+    //                         panic!("Bind failed: {:?}", bind_response)
+    //                     }
+    //                 }
+    //             }
+    //         } else {
+    //             panic!("Unable to get bind response")
+    //         }
+    //     }
+    // }
 
-    pub async fn kerbero_bind(
-        &mut self,
-        username: String,
-        password: String,
-        domain: String,
-        kdc_proxy_url: String,
-        target: String,
-    ) -> JsResult<JsValue> {
-        let mut kerberos =
-            KerberoAuthProvier::new(&username, &password, &domain, &kdc_proxy_url, &target,&target);
-        let ntlm_token = kerberos.step(&[]).await.unwrap();
+    // pub async fn kerbero_bind(
+    //     &mut self,
+    //     username: String,
+    //     password: String,
+    //     domain: String,
+    //     kdc_proxy_url: String,
+    //     target: String,
+    // ) -> JsResult<JsValue> {
+    //     let mut kerberos =
+    //         KerberoAuthProvier::new(&username, &password, &domain, &kdc_proxy_url, &target,&target);
+    //     let ntlm_token = kerberos.step(&[]).await.unwrap();
 
-        let msg = LdapMsg {
-            msgid: 1,
-            op: LdapOp::BindRequest(LdapBindRequest {
-                dn: "".to_string(),
-                cred: LdapBindCred::SASL(SaslCredentials {
-                    mechanism: "GSS-SPNEGO".to_string(),
-                    credentials: ntlm_token,
-                }),
-            }),
-            ctrl: vec![],
-        };
+    //     let msg = LdapMsg {
+    //         msgid: 1,
+    //         op: LdapOp::BindRequest(LdapBindRequest {
+    //             dn: "".to_string(),
+    //             cred: LdapBindCred::SASL(SaslCredentials {
+    //                 mechanism: "GSS-SPNEGO".to_string(),
+    //                 credentials: ntlm_token,
+    //             }),
+    //         }),
+    //         ctrl: vec![],
+    //     };
 
-        let mut frame = self.frame.lock().await;
-        frame.send(msg).await.map_err(|e| {
-            to_js_error!(
-                "Unable to send bind request -> {:?}, {:?}",
-                e,
-                e.to_string()
-            )
-        })?;
-        loop {
-            if let Some(Ok(msg)) = frame.next().await {
-                if let LdapOp::BindResponse(bind_response) = msg.op {
-                    match bind_response.res.code {
-                        LdapResultCode::Success => {
-                            println!("Bind successful");
-                            break Ok(serde_wasm_bindgen::to_value(&bind_response)?);
-                        }
-                        LdapResultCode::SaslBindInProgress => {
-                            if let Some(ref cred) = bind_response.saslcreds {
-                                let ntlm_token = kerberos.step(cred).await.unwrap();
-                                let msg = LdapMsg {
-                                    msgid: 2,
-                                    op: LdapOp::BindRequest(LdapBindRequest {
-                                        dn: String::default(),
-                                        cred: LdapBindCred::SASL(SaslCredentials {
-                                            mechanism: "GSS-SPNEGO".to_string(),
-                                            credentials: ntlm_token,
-                                        }),
-                                    }),
-                                    ctrl: vec![],
-                                };
+    //     let mut frame = self.frame.lock().await;
+    //     frame.send(msg).await.map_err(|e| {
+    //         to_js_error!(
+    //             "Unable to send bind request -> {:?}, {:?}",
+    //             e,
+    //             e.to_string()
+    //         )
+    //     })?;
+    //     loop {
+    //         if let Some(Ok(msg)) = frame.next().await {
+    //             if let LdapOp::BindResponse(bind_response) = msg.op {
+    //                 match bind_response.res.code {
+    //                     LdapResultCode::Success => {
+    //                         println!("Bind successful");
+    //                         break Ok(serde_wasm_bindgen::to_value(&bind_response)?);
+    //                     }
+    //                     LdapResultCode::SaslBindInProgress => {
+    //                         if let Some(ref cred) = bind_response.saslcreds {
+    //                             let ntlm_token = kerberos.step(cred).await.unwrap();
+    //                             let msg = LdapMsg {
+    //                                 msgid: 2,
+    //                                 op: LdapOp::BindRequest(LdapBindRequest {
+    //                                     dn: String::default(),
+    //                                     cred: LdapBindCred::SASL(SaslCredentials {
+    //                                         mechanism: "GSS-SPNEGO".to_string(),
+    //                                         credentials: ntlm_token,
+    //                                     }),
+    //                                 }),
+    //                                 ctrl: vec![],
+    //                             };
 
-                                frame.send(msg).await.map_err(|e| {
-                                    to_js_error!(
-                                        "Unable to send bind request -> {:?}, {:?}",
-                                        e,
-                                        e.to_string()
-                                    )
-                                })?;
-                            }
-                        }
-                        _ => {
-                            break Err(to_js_error!("Bind failed: {:?}", bind_response));
-                        }
-                    }  
-                }
-            } else {
-                break Err(to_js_error!("Unable to get bind response"));
-            }
-        }
-    }
+    //                             frame.send(msg).await.map_err(|e| {
+    //                                 to_js_error!(
+    //                                     "Unable to send bind request -> {:?}, {:?}",
+    //                                     e,
+    //                                     e.to_string()
+    //                                 )
+    //                             })?;
+    //                         }
+    //                     }
+    //                     _ => {
+    //                         break Err(to_js_error!("Bind failed: {:?}", bind_response));
+    //                     }
+    //                 }  
+    //             }
+    //         } else {
+    //             break Err(to_js_error!("Unable to get bind response"));
+    //         }
+    //     }
+    // }
 }
+
+
 
 //================================================================================================
 

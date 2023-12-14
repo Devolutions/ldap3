@@ -1,3 +1,4 @@
+#![allow(non_snake_case)]
 use anyhow::Ok;
 use ldap3_proto::proto::{LdapModify, LdapModifyType};
 use serde::{Deserialize, Serialize};
