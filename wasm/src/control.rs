@@ -1,3 +1,4 @@
+#![allow(non_snake_case)]
 use serde::{Deserialize, Serialize};
 use tsify::Tsify;
 use uuid::Uuid;
@@ -225,7 +226,7 @@ impl Into<ldap3_proto::control::LdapControl> for LdapControl {
 #[serde(rename_all = "snake_case")]
 #[tsify(into_wasm_abi, from_wasm_abi)]
 pub struct ServerSortResult {
-    result_code: ServerSortResultCode,
+    result_code: LdapResultCode,
     attribute_type: Option<String>,
 }
 
@@ -248,37 +249,102 @@ impl Into<ldap3_proto::control::ServerSortResult> for ServerSortResult {
 }
 
 #[derive(Debug, Serialize, Deserialize, Tsify)]
-#[repr(u8)]
 #[serde(rename_all = "snake_case")]
 #[tsify(into_wasm_abi, from_wasm_abi)]
-pub enum ServerSortResultCode {
+pub enum LdapResultCode {
     Success = 0,
     OperationsError = 1,
+    ProtocolError = 2,
     TimeLimitExceeded = 3,
-    StrongAuthRequired = 8,
+    SizeLimitExceeded = 4,
+    CompareFalse = 5,
+    CompareTrue = 6,
+    AuthMethodNotSupported = 7,
+    StrongerAuthRequired = 8,
+    // 9 reserved?
+    Referral = 10,
     AdminLimitExceeded = 11,
+    UnavailableCriticalExtension = 12,
+    ConfidentialityRequired = 13,
+    SaslBindInProgress = 14,
+    // 15 ?
     NoSuchAttribute = 16,
+    UndefinedAttributeType = 17,
     InappropriateMatching = 18,
-    InsufficientAccessRights = 50,
+    ConstraintViolation = 19,
+    AttributeOrValueExists = 20,
+    InvalidAttributeSyntax = 21,
+    //22 31
+    NoSuchObject = 32,
+    AliasProblem = 33,
+    InvalidDNSyntax = 34,
+    // 35
+    AliasDereferencingProblem = 36,
+    // 37 - 47
+    InappropriateAuthentication = 48,
+    InvalidCredentials = 49,
+    InsufficentAccessRights = 50,
     Busy = 51,
+    Unavailable = 52,
     UnwillingToPerform = 53,
+    LoopDetect = 54,
+    // 55 - 63
+    NamingViolation = 64,
+    ObjectClassViolation = 65,
+    NotAllowedOnNonLeaf = 66,
+    NotALlowedOnRDN = 67,
+    EntryAlreadyExists = 68,
+    ObjectClassModsProhibited = 69,
+    // 70
+    AffectsMultipleDSAs = 71,
+    // 72 - 79
     Other = 80,
+    EsyncRefreshRequired = 4096,
 }
 
 sync_state_enum_convert!(
-    ldap3_proto::control::ServerSortResultCode,
-    ServerSortResultCode,
+    ldap3_proto::proto::LdapResultCode,
+    LdapResultCode,
     Success,
     OperationsError,
+    ProtocolError,
     TimeLimitExceeded,
-    StrongAuthRequired,
+    SizeLimitExceeded,
+    CompareFalse,
+    CompareTrue,
+    AuthMethodNotSupported,
+    StrongerAuthRequired,
+    Referral,
     AdminLimitExceeded,
+    UnavailableCriticalExtension,
+    ConfidentialityRequired,
+    SaslBindInProgress,
     NoSuchAttribute,
+    UndefinedAttributeType,
     InappropriateMatching,
-    InsufficientAccessRights,
+    ConstraintViolation,
+    AttributeOrValueExists,
+    InvalidAttributeSyntax,
+    NoSuchObject,
+    AliasProblem,
+    InvalidDNSyntax,
+    AliasDereferencingProblem,
+    InappropriateAuthentication,
+    InvalidCredentials,
+    InsufficentAccessRights,
     Busy,
+    Unavailable,
     UnwillingToPerform,
-    Other
+    LoopDetect,
+    NamingViolation,
+    ObjectClassViolation,
+    NotAllowedOnNonLeaf,
+    NotALlowedOnRDN,
+    EntryAlreadyExists,
+    ObjectClassModsProhibited,
+    AffectsMultipleDSAs,
+    Other,
+    EsyncRefreshRequired
 );
 
 #[derive(Debug, Clone, PartialEq, Hash, Eq, PartialOrd, Ord, Serialize, Deserialize, Tsify)]
