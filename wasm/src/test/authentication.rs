@@ -1,6 +1,6 @@
 use wasm_bindgen_test::wasm_bindgen_test;
 
-use crate::{ldap_session::{LdapSession, LdapSessionParameters}, JsFunction};
+use crate::{ldap_session::{LdapSession, LdapSessionParameters}};
 
 #[wasm_bindgen_test]
 async fn test_kerbero_bind() {

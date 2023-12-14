@@ -157,7 +157,7 @@ impl LdapParser {
     ) -> JsResult<Vec<JsValue>> {
         let syntax = LdapSyntax::from_oid_to_vec(&oid)
             .into_iter()
-            .find(|v| v.om_syntax() == &om_syntax)
+            .find(|v| v.om_syntax() == om_syntax)
             .ok_or(to_js_error!("No syntax found"))?;
         LdapParser::to_displayable_impl(syntax, attribute_value)
             .map_err(|e| to_js_error!("{:?}", e))

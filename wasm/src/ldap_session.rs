@@ -16,9 +16,11 @@ use ldap3_proto::{
     LdapCodec, LdapMsg, LdapResultCode, LdapSearchScope,
 };
 
+use serde::{Serialize, Deserialize};
 use tokio::sync::Mutex;
 use tokio_util::codec::Framed;
 
+use tsify::Tsify;
 use wasm_bindgen::prelude::*;
 use ws_stream_wasm::WsStreamIo;
 
@@ -28,7 +30,7 @@ use crate::{
     replace_with_new_vec, return_msg_if_type_matches,
     schema::search_objects::AttributesArray,
     search::LdapSearchStreamBuilder,
-    send_message, authentication::{ntlm::NtlmAuthProvier, kerberos::KerberoAuthProvier},
+    send_message, authentication::{ntlm::NtlmAuthProvier, kerberos::KerberoAuthProvier, SecurityProvider},
 };
 use crate::{modify::ModifyRequest, search::LdapSearchResultStream};
 use crate::{to_js_error, JsResult};
@@ -278,7 +280,7 @@ impl LdapSession {
 
     pub async fn ntlm_bind(&mut self, username: String, password: String) -> JsResult<JsValue> {
         let mut ntlm = NtlmAuthProvier::new(&username, &password);
-        let ntlm_token = ntlm.step(&[]).unwrap();
+        let ntlm_token = ntlm.step(&[]).await.unwrap();
 
         let msg = LdapMsg {
             msgid: 1,
@@ -310,7 +312,7 @@ impl LdapSession {
                         }
                         LdapResultCode::SaslBindInProgress => {
                             if let Some(ref cred) = bind_response.saslcreds {
-                                let ntlm_token = ntlm.step(cred).unwrap();
+                                let ntlm_token = ntlm.step(cred).await.unwrap();
                                 let msg = LdapMsg {
                                     msgid: 2,
                                     op: LdapOp::BindRequest(LdapBindRequest {
@@ -352,7 +354,7 @@ impl LdapSession {
         target: String,
     ) -> JsResult<JsValue> {
         let mut kerberos =
-            KerberoAuthProvier::new(&username, &password, &domain, &kdc_proxy_url, &target);
+            KerberoAuthProvier::new(&username, &password, &domain, &kdc_proxy_url, &target,&target);
         let ntlm_token = kerberos.step(&[]).await.unwrap();
 
         let msg = LdapMsg {
@@ -389,7 +391,7 @@ impl LdapSession {
                                 let msg = LdapMsg {
                                     msgid: 2,
                                     op: LdapOp::BindRequest(LdapBindRequest {
-                                        dn: "".to_string(),
+                                        dn: String::default(),
                                         cred: LdapBindCred::SASL(SaslCredentials {
                                             mechanism: "GSS-SPNEGO".to_string(),
                                             credentials: ntlm_token,
@@ -408,12 +410,12 @@ impl LdapSession {
                             }
                         }
                         _ => {
-                            panic!("Bind failed: {:?}", bind_response)
+                            break Err(to_js_error!("Bind failed: {:?}", bind_response));
                         }
-                    }
+                    }  
                 }
             } else {
-                panic!("Unable to get bind response")
+                break Err(to_js_error!("Unable to get bind response"));
             }
         }
     }
@@ -439,3 +441,13 @@ impl From<JsLdapSearchScope> for LdapSearchScope {
         }
     }
 }
+
+#[derive(Debug,Tsify,Serialize,Deserialize)]
+#[serde(rename_all = "snake_case",untagged)]   
+#[tsify(into_wasm_abi,from_wasm_abi)]
+pub enum AuthenticationProtocol {
+    Ntlm,
+    Kerberos,
+    Negotiate,
+}
+
