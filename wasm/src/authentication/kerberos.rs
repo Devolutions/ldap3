@@ -61,6 +61,11 @@ impl SecurityProvider for KerberoAuthProvier {
                 input.to_vec().clone(),
                 SecurityBufferType::Token,
             )];
+            let target_name = if self.use_ldaps {
+                format!("LDAPS/{}", self.server_computer_name)
+            } else {
+                format!("LDAP/{}", self.server_computer_name)
+            };
             let mut builder =
                 EmptyInitializeSecurityContext::<<Kerberos as SspiImpl>::CredentialsHandle>::new()
                     .with_credentials_handle(&mut self.credentials_handle)
@@ -68,7 +73,7 @@ impl SecurityProvider for KerberoAuthProvier {
                         ClientRequestFlags::ALLOCATE_MEMORY | ClientRequestFlags::MUTUAL_AUTH,
                     )
                     .with_target_data_representation(DataRepresentation::Native)
-                    .with_target_name("LDAP/IT-HELP-DC.ad.it-help.ninja")
+                    .with_target_name(&target_name)
                     .with_input(&mut input_buffer)
                     .with_output(&mut output_buffer);
 

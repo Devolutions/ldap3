@@ -9,10 +9,11 @@ use super::{SecurityProvider, StepResult};
 pub(crate) struct NtlmAuthProvier {
     ntlm: Ntlm,
     credentials_handle: <Ntlm as SspiImpl>::CredentialsHandle,
+    server_computer_name: String,
 }
 
 impl NtlmAuthProvier {
-    pub(crate) fn new(ldap_username: &str, ldap_password: &str) -> Self {
+    pub(crate) fn new(ldap_username: &str, ldap_password: &str, server_computer_name:&str) -> Self {
         let identity = AuthIdentity {
             username: Username::parse(ldap_username).unwrap(),
             password: ldap_password.to_string().into(),
@@ -30,6 +31,7 @@ impl NtlmAuthProvier {
         Self {
             ntlm,
             credentials_handle: acq_cred_result.credentials_handle,
+            server_computer_name: server_computer_name.to_string(),
         }
     }
 }

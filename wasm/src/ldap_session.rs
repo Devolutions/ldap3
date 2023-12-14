@@ -1,21 +1,28 @@
 #![allow(non_snake_case)]
 // this is because Tsify and wasm-bindgen generates name in PascalCase, will look for solution later
-use core::panic;
-use std::sync::Arc;
-use crate::error::JsErrorValue;
+use crate::{
+    authentication::{
+        kerberos::KerberoAuthProvier, negotiate::NegotiateAuthProvier, ntlm::NtlmAuthProvier,
+        SecurityProvider,
+    },
+    error::JsErrorValue,
+};
 use async_io_stream::IoStream;
+use core::panic;
 use futures_util::sink::SinkExt;
 use futures_util::StreamExt;
+use std::sync::Arc;
 
 use ldap3_proto::{
     parse_ldap_filter_str,
     proto::{
         LdapAddRequest, LdapBindCred, LdapBindRequest, LdapModify, LdapModifyRequest, LdapOp,
+        SaslCredentials,
     },
-    LdapCodec, LdapMsg, LdapSearchScope,
+    LdapCodec, LdapMsg, LdapResultCode, LdapSearchScope,
 };
 
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use tokio_util::codec::Framed;
 
@@ -24,7 +31,14 @@ use tsify::Tsify;
 use wasm_bindgen::prelude::*;
 use ws_stream_wasm::WsStreamIo;
 
-use crate::{modify::ModifyRequest, search::{LdapSearchResultStream, LdapSearchStreamBuilder}, control::LdapControlArray, schema::search_objects::AttributesArray, send_message, return_msg_if_type_matches};
+use crate::{
+    control::LdapControlArray,
+    modify::ModifyRequest,
+    return_msg_if_type_matches,
+    schema::search_objects::AttributesArray,
+    search::{LdapSearchResultStream, LdapSearchStreamBuilder},
+    send_message,
+};
 use crate::{to_js_error, JsResult};
 
 pub(crate) type LdapFrame = Framed<IoStream<WsStreamIo, Vec<u8>>, LdapCodec>;
@@ -32,14 +46,11 @@ pub(crate) type LdapFrame = Framed<IoStream<WsStreamIo, Vec<u8>>, LdapCodec>;
 pub struct LdapSession {
     frame: Arc<Mutex<LdapFrame>>,
     message_id: i32,
-    parameters: LdapSessionParameters,
 }
 
 #[wasm_bindgen]
 pub struct LdapSessionParameters {
     server_address_ws_proxy: String,
-    _kdc_address: Option<String>,             // to be used in the future
-    _kdc_address_ws_endpoint: Option<String>, // to be used in the future
 }
 
 #[wasm_bindgen]
@@ -47,9 +58,7 @@ impl LdapSessionParameters {
     #[wasm_bindgen(constructor)]
     pub fn new(server_address_ws_proxy: String) -> Self {
         Self {
-            server_address_ws_proxy,
-            _kdc_address: None,
-            _kdc_address_ws_endpoint: None,
+            server_address_ws_proxy
         }
     }
 }
@@ -85,7 +94,6 @@ impl LdapSession {
         let session = LdapSession {
             frame: Arc::new(Mutex::new(framed)),
             message_id: 0,
-            parameters: params,
         };
         Ok(session)
     }
@@ -231,6 +239,16 @@ impl LdapSession {
     }
 }
 
+#[derive(Debug, Tsify, Serialize, Deserialize)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
+pub struct SaslBindConfig {
+    pub username: String,
+    pub password: String,
+    pub auth_method: SspiAuthMethod,
+    pub use_ldaps: bool,
+    pub controls: Option<LdapControlArray>,
+}
+
 #[wasm_bindgen]
 impl LdapSession {
     pub async fn bind(
@@ -276,155 +294,116 @@ impl LdapSession {
         Ok(())
     }
 
-    // pub async fn ntlm_bind(
-    //     &mut self,
-    //     username: String,
-    //     password: String,
-    //     control: Option<LdapControlArray>,
-    // ) -> JsResult<JsValue> {
-    //     let mut ntlm = NtlmAuthProvier::new(&username, &password);
-    //     let ntlm_token = ntlm.step(&[]).await.unwrap();
+    pub async fn sasl_bind(&mut self, config: SaslBindConfig) -> JsResult<JsValue> {
+        let SaslBindConfig {
+            username,
+            password,
+            auth_method,
+            use_ldaps,
+            controls,
+        } = config;
 
-    //     let msg = LdapMsg {
-    //         msgid: 1,
-    //         op: LdapOp::BindRequest(LdapBindRequest {
-    //             dn: "".to_string(),
-    //             cred: LdapBindCred::SASL(SaslCredentials {
-    //                 mechanism: "GSS-SPNEGO".to_string(),
-    //                 credentials: ntlm_token,
-    //             }),
-    //         }),
-    //         ctrl: control.unwrap_or_default().into(),
-    //     };
+        let mut auth_provider: Box<dyn SecurityProvider> = match auth_method {
+            SspiAuthMethod::Ntlm {
+                server_computer_name,
+            } => Box::new(NtlmAuthProvier::new(
+                &username,
+                &password,
+                &server_computer_name,
+            )),
+            SspiAuthMethod::Kerberos {
+                domain,
+                kdc_proxy_url,
+                server_computer_name,
+            } => Box::new(KerberoAuthProvier::new(
+                &username,
+                &password,
+                &domain,
+                &kdc_proxy_url,
+                &server_computer_name,
+                &server_computer_name,
+                use_ldaps,
+            )),
+            SspiAuthMethod::Negotiate {
+                domain,
+                kdc_proxy_url,
+                server_computer_name,
+            } => Box::new(NegotiateAuthProvier::new(
+                &username,
+                &password,
+                &domain,
+                &kdc_proxy_url,
+                &server_computer_name,
+                &server_computer_name,
+                use_ldaps,
+            )),
+        };
 
-    //     let mut frame = self.frame.lock().await;
-    //     frame.send(msg).await.map_err(|e| {
-    //         to_js_error!(
-    //             "Unable to send bind request -> {:?}, {:?}",
-    //             e,
-    //             e.to_string()
-    //         )
-    //     })?;
-    //     loop {
-    //         if let Some(Ok(msg)) = frame.next().await {
-    //             if let LdapOp::BindResponse(bind_response) = msg.op {
-    //                 match bind_response.res.code {
-    //                     LdapResultCode::Success => {
-    //                         println!("Bind successful");
-    //                         break Ok(serde_wasm_bindgen::to_value(&bind_response)?);
-    //                     }
-    //                     LdapResultCode::SaslBindInProgress => {
-    //                         if let Some(ref cred) = bind_response.saslcreds {
-    //                             let ntlm_token = ntlm.step(cred).await.unwrap();
-    //                             let msg = LdapMsg {
-    //                                 msgid: 2,
-    //                                 op: LdapOp::BindRequest(LdapBindRequest {
-    //                                     dn: "".to_string(),
-    //                                     cred: LdapBindCred::SASL(SaslCredentials {
-    //                                         mechanism: "GSS-SPNEGO".to_string(),
-    //                                         credentials: ntlm_token,
-    //                                     }),
-    //                                 }),
-    //                                 ctrl: vec![],
-    //                             };
+        let token = auth_provider.step(&[]).await.unwrap();
 
-    //                             frame.send(msg).await.map_err(|e| {
-    //                                 to_js_error!(
-    //                                     "Unable to send bind request -> {:?}, {:?}",
-    //                                     e,
-    //                                     e.to_string()
-    //                                 )
-    //                             })?;
-    //                         }
-    //                     }
-    //                     _ => {
-    //                         panic!("Bind failed: {:?}", bind_response)
-    //                     }
-    //                 }
-    //             }
-    //         } else {
-    //             panic!("Unable to get bind response")
-    //         }
-    //     }
-    // }
+        let msg = LdapMsg {
+            msgid: 1,
+            op: LdapOp::BindRequest(LdapBindRequest {
+                dn: "".to_string(),
+                cred: LdapBindCred::SASL(SaslCredentials {
+                    mechanism: "GSS-SPNEGO".to_string(),
+                    credentials: token,
+                }),
+            }),
+            ctrl: controls.unwrap_or_default().into(),
+        };
 
-    // pub async fn kerbero_bind(
-    //     &mut self,
-    //     username: String,
-    //     password: String,
-    //     domain: String,
-    //     kdc_proxy_url: String,
-    //     target: String,
-    // ) -> JsResult<JsValue> {
-    //     let mut kerberos =
-    //         KerberoAuthProvier::new(&username, &password, &domain, &kdc_proxy_url, &target,&target);
-    //     let ntlm_token = kerberos.step(&[]).await.unwrap();
+        let frame_arc = self.frame.clone();
+        let mut frame = frame_arc.lock().await;
 
-    //     let msg = LdapMsg {
-    //         msgid: 1,
-    //         op: LdapOp::BindRequest(LdapBindRequest {
-    //             dn: "".to_string(),
-    //             cred: LdapBindCred::SASL(SaslCredentials {
-    //                 mechanism: "GSS-SPNEGO".to_string(),
-    //                 credentials: ntlm_token,
-    //             }),
-    //         }),
-    //         ctrl: vec![],
-    //     };
+        frame
+            .send(msg)
+            .await
+            .map_err(|e| to_js_error!("unable to send bind request: {:?}", e))?;
 
-    //     let mut frame = self.frame.lock().await;
-    //     frame.send(msg).await.map_err(|e| {
-    //         to_js_error!(
-    //             "Unable to send bind request -> {:?}, {:?}",
-    //             e,
-    //             e.to_string()
-    //         )
-    //     })?;
-    //     loop {
-    //         if let Some(Ok(msg)) = frame.next().await {
-    //             if let LdapOp::BindResponse(bind_response) = msg.op {
-    //                 match bind_response.res.code {
-    //                     LdapResultCode::Success => {
-    //                         println!("Bind successful");
-    //                         break Ok(serde_wasm_bindgen::to_value(&bind_response)?);
-    //                     }
-    //                     LdapResultCode::SaslBindInProgress => {
-    //                         if let Some(ref cred) = bind_response.saslcreds {
-    //                             let ntlm_token = kerberos.step(cred).await.unwrap();
-    //                             let msg = LdapMsg {
-    //                                 msgid: 2,
-    //                                 op: LdapOp::BindRequest(LdapBindRequest {
-    //                                     dn: String::default(),
-    //                                     cred: LdapBindCred::SASL(SaslCredentials {
-    //                                         mechanism: "GSS-SPNEGO".to_string(),
-    //                                         credentials: ntlm_token,
-    //                                     }),
-    //                                 }),
-    //                                 ctrl: vec![],
-    //                             };
+        loop {
+            let msg = frame
+                .next()
+                .await
+                .ok_or(to_js_error!("Unable to get bind response"))?
+                .map_err(|e| to_js_error!("Unable to get bind response: {:?}", e))?;
 
-    //                             frame.send(msg).await.map_err(|e| {
-    //                                 to_js_error!(
-    //                                     "Unable to send bind request -> {:?}, {:?}",
-    //                                     e,
-    //                                     e.to_string()
-    //                                 )
-    //                             })?;
-    //                         }
-    //                     }
-    //                     _ => {
-    //                         break Err(to_js_error!("Bind failed: {:?}", bind_response));
-    //                     }
-    //                 }  
-    //             }
-    //         } else {
-    //             break Err(to_js_error!("Unable to get bind response"));
-    //         }
-    //     }
-    // }
+            let bind_response = if let LdapOp::BindResponse(bind_response) = msg.op {
+                bind_response
+            }else{
+                break Err(to_js_error!("Invalid response type,expected BindResponse"));
+            };
+
+            match bind_response.res.code {
+                LdapResultCode::Success => {
+                    println!("Bind successful");
+                    break Ok(serde_wasm_bindgen::to_value(&bind_response)?);
+                }
+                LdapResultCode::SaslBindInProgress => {
+                    if let Some(ref cred) = bind_response.saslcreds {
+                        let ntlm_token = auth_provider.step(cred).await.map_err(|e| to_js_error!("Unable to get ntlm token: {:?}", e))?;
+                        let msg = LdapMsg {
+                            msgid: self.next_message_id(),
+                            op: LdapOp::BindRequest(LdapBindRequest {
+                                dn: String::default(),
+                                cred: LdapBindCred::SASL(SaslCredentials {
+                                    mechanism: "GSS-SPNEGO".to_string(),
+                                    credentials: ntlm_token,
+                                }),
+                            }),
+                            ctrl: vec![],
+                        };
+
+                        frame.send(msg).await.map_err(|e| to_js_error!("Unable to send bind request -> {:?}",e))?;
+                    }
+                }
+                _ => {
+                    break Err(to_js_error!("Bind failed: {:?}", bind_response));
+                }
+            }
+        }
+    }
 }
-
-
 
 //================================================================================================
 
@@ -447,12 +426,21 @@ impl From<JsLdapSearchScope> for LdapSearchScope {
     }
 }
 
-#[derive(Debug,Tsify,Serialize,Deserialize)]
-#[serde(rename_all = "snake_case",untagged)]   
-#[tsify(into_wasm_abi,from_wasm_abi)]
-pub enum AuthenticationProtocol {
-    Ntlm,
-    Kerberos,
-    Negotiate,
+#[derive(Debug, Tsify, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[tsify(from_wasm_abi)]
+pub enum SspiAuthMethod {
+    Ntlm {
+        server_computer_name: String,
+    },
+    Kerberos {
+        domain: String,
+        kdc_proxy_url: String,
+        server_computer_name: String,
+    },
+    Negotiate {
+        domain: String,
+        kdc_proxy_url: String,
+        server_computer_name: String,
+    },
 }
-
