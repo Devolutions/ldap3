@@ -45,12 +45,13 @@ impl SecurityProvider for NtlmAuthProvier {
                 input.to_vec().clone(),
                 SecurityBufferType::Token,
             )];
+            let target_name = format!("LDAP/{}", self.server_computer_name);
             let mut builder =
                 EmptyInitializeSecurityContext::<<Ntlm as SspiImpl>::CredentialsHandle>::new()
                     .with_credentials_handle(&mut self.credentials_handle)
                     .with_context_requirements(ClientRequestFlags::ALLOCATE_MEMORY)
                     .with_target_data_representation(DataRepresentation::Native)
-                    .with_target_name("LDAP/IT-HELP-DC")
+                    .with_target_name(&target_name)
                     .with_input(&mut input_buffer)
                     .with_output(&mut output_buffer);
 

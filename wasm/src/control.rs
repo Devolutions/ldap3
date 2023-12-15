@@ -12,14 +12,15 @@ macro_rules! sync_state_enum_convert {
                 }
             }
         }
-        
-        impl Into<$source> for $target {
-            fn into(self) -> $source {
-                match self {
+
+         impl From<$target> for $source {
+            fn from(val: $target)-> $source {
+                match val {
                     $( <$target>::$variant => <$source>::$variant, )+
                 }
             }
         }
+
     };
 }
 
