@@ -246,7 +246,6 @@ pub struct SaslBindConfig {
     pub username: String,
     pub password: String,
     pub auth_method: SspiAuthMethod,
-    pub use_ldaps: bool,
     pub controls: Option<LdapControlArray>,
 }
 
@@ -300,7 +299,6 @@ impl LdapSession {
             username,
             password,
             auth_method,
-            use_ldaps,
             controls,
         } = config;
 
@@ -323,7 +321,6 @@ impl LdapSession {
                 &kdc_proxy_url,
                 &server_computer_name,
                 &server_computer_name,
-                use_ldaps,
             )),
             SspiAuthMethod::Negotiate {
                 domain,
@@ -336,7 +333,6 @@ impl LdapSession {
                 &kdc_proxy_url,
                 &server_computer_name,
                 &server_computer_name,
-                use_ldaps,
             )),
         };
 

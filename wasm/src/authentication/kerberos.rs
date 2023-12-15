@@ -1,4 +1,4 @@
-use futures_util::future::{LocalBoxFuture};
+use futures_util::future::LocalBoxFuture;
 use sspi::{
     builders::EmptyInitializeSecurityContext, AuthIdentity, ClientRequestFlags, CredentialUse,
     DataRepresentation, Kerberos, KerberosConfig, SecurityBuffer, SecurityBufferType,
@@ -6,13 +6,11 @@ use sspi::{
 };
 use tracing::debug;
 
-
 use super::{SecurityProvider, StepResult, WasmNetworkClient};
 pub struct KerberoAuthProvier {
     kerbero: Kerberos,
     credentials_handle: <Kerberos as SspiImpl>::CredentialsHandle,
     server_computer_name: String,
-    use_ldaps: bool,
 }
 
 impl KerberoAuthProvier {
@@ -24,7 +22,6 @@ impl KerberoAuthProvier {
         kdc_proxy_url: &str,
         client_computer_name: &str,
         server_computer_name: &str,
-        use_ldaps: bool,
     ) -> Self {
         let identity = AuthIdentity {
             username: Username::new(ldap_username, Some(domain)).unwrap(),
@@ -46,7 +43,6 @@ impl KerberoAuthProvier {
             kerbero,
             credentials_handle: acq_cred_result.credentials_handle,
             server_computer_name: server_computer_name.to_string(),
-            use_ldaps,
         }
     }
 }
@@ -61,11 +57,7 @@ impl SecurityProvider for KerberoAuthProvier {
                 input.to_vec().clone(),
                 SecurityBufferType::Token,
             )];
-            let target_name = if self.use_ldaps {
-                format!("LDAPS/{}", self.server_computer_name)
-            } else {
-                format!("LDAP/{}", self.server_computer_name)
-            };
+            let target_name = format!("LDAP/{}", self.server_computer_name);
             let mut builder =
                 EmptyInitializeSecurityContext::<<Kerberos as SspiImpl>::CredentialsHandle>::new()
                     .with_credentials_handle(&mut self.credentials_handle)
@@ -107,4 +99,3 @@ impl SecurityProvider for KerberoAuthProvier {
         })
     }
 }
-

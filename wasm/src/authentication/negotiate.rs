@@ -11,7 +11,6 @@ pub struct NegotiateAuthProvier {
     negotiate: Negotiate,
     credentials_handle: <Negotiate as SspiImpl>::CredentialsHandle,
     server_computer_name: String,
-    use_ldaps: bool,
 }
 
 impl NegotiateAuthProvier {
@@ -22,7 +21,6 @@ impl NegotiateAuthProvier {
         kdc_proxy_url: &str,
         client_computer_name: &str,
         server_computer_name: &str,
-        use_ldaps: bool,
     ) -> Self {
         let identity = AuthIdentity {
             username: Username::new(ldap_username, Some(domain)).unwrap(),
@@ -46,7 +44,6 @@ impl NegotiateAuthProvier {
             negotiate,
             credentials_handle: acq_cred_result.credentials_handle,
             server_computer_name: server_computer_name.to_string(),
-            use_ldaps,
         }
     }
 }
@@ -61,12 +58,7 @@ impl SecurityProvider for NegotiateAuthProvier {
                 input.to_vec().clone(),
                 SecurityBufferType::Token,
             )];
-            let target_name = format!(
-                "{}/{}",
-                if self.use_ldaps { "LDAPS" } else { "LDAP" },
-                self.server_computer_name
-            );
-
+            let target_name = format!("LDAP/{}", self.server_computer_name);
             let mut builder =
                 EmptyInitializeSecurityContext::<<Negotiate as SspiImpl>::CredentialsHandle>::new()
                     .with_credentials_handle(&mut self.credentials_handle)

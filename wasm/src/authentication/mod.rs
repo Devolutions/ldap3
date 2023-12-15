@@ -10,15 +10,6 @@ pub mod ntlm;
 pub mod kerberos;
 pub mod negotiate;
 
-#[derive(Debug,Tsify,Serialize,Deserialize)]
-#[serde(rename_all = "snake_case",untagged)]   
-#[tsify(into_wasm_abi,from_wasm_abi)]
-pub enum AuthenticationProtocol {
-    Ntlm,
-    Kerberos,
-    Negotiate,
-}
-
 /*
 We are not seeking to implement GSSAPI encryption/decryption, at this time.
 We will use LDAP over TLS, instead.
