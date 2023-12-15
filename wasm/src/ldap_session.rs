@@ -8,7 +8,6 @@ use crate::{
     error::JsErrorValue,
 };
 use async_io_stream::IoStream;
-use core::panic;
 use futures_util::sink::SinkExt;
 use futures_util::StreamExt;
 use std::sync::Arc;
