@@ -3,26 +3,7 @@ use serde::{Deserialize, Serialize};
 use tsify::Tsify;
 use uuid::Uuid;
 
-macro_rules! sync_state_enum_convert {
-    ($source:ty, $target:ty, $($variant:ident),+) => {
-        impl From<$source> for $target {
-            fn from(val: $source) -> Self {
-                match val {
-                    $( <$source>::$variant => <$target>::$variant, )+
-                }
-            }
-        }
-
-         impl From<$target> for $source {
-            fn from(val: $target)-> $source {
-                match val {
-                    $( <$target>::$variant => <$source>::$variant, )+
-                }
-            }
-        }
-
-    };
-}
+use crate::impl_same_enum;
 
 #[derive(Debug, Serialize, Deserialize, Tsify)]
 #[repr(i64)]
@@ -33,7 +14,7 @@ pub enum SyncRequestMode {
     RefreshAndPersist = 3,
 }
 
-sync_state_enum_convert!(
+impl_same_enum!(
     ldap3_proto::proto::SyncRequestMode,
     SyncRequestMode,
     RefreshOnly,
@@ -51,7 +32,7 @@ pub enum SyncStateValue {
     Delete = 3,
 }
 
-sync_state_enum_convert!(
+impl_same_enum!(
     ldap3_proto::proto::SyncStateValue,
     SyncStateValue,
     Present,
@@ -303,7 +284,7 @@ pub enum LdapResultCode {
     EsyncRefreshRequired = 4096,
 }
 
-sync_state_enum_convert!(
+impl_same_enum!(
     ldap3_proto::proto::LdapResultCode,
     LdapResultCode,
     Success,

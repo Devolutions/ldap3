@@ -22,3 +22,25 @@ macro_rules! return_msg_if_type_matches {
         }
     };
 }
+
+#[macro_export]
+macro_rules! impl_same_enum {
+    ($source:ty, $target:ty, $($variant:ident),+) => {
+        impl From<$source> for $target {
+            fn from(val: $source) -> Self {
+                match val {
+                    $( <$source>::$variant => <$target>::$variant, )+
+                }
+            }
+        }
+
+         impl From<$target> for $source {
+            fn from(val: $target)-> $source {
+                match val {
+                    $( <$target>::$variant => <$source>::$variant, )+
+                }
+            }
+        }
+
+    };
+}

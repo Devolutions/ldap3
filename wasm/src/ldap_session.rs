@@ -5,7 +5,8 @@ use crate::{
         kerberos::KerberoAuthProvier, negotiate::NegotiateAuthProvier, ntlm::NtlmAuthProvier,
         SecurityProvider,
     },
-    error::JsErrorValue, dto::control::LdapControlArray,
+    dto::control::LdapControlArray,
+    error::JsErrorValue,
 };
 use async_io_stream::IoStream;
 use futures_util::sink::SinkExt;
@@ -55,7 +56,7 @@ impl LdapSessionParameters {
     #[wasm_bindgen(constructor)]
     pub fn new(server_address_ws_proxy: String) -> Self {
         Self {
-            server_address_ws_proxy
+            server_address_ws_proxy,
         }
     }
 }
@@ -364,7 +365,7 @@ impl LdapSession {
 
             let bind_response = if let LdapOp::BindResponse(bind_response) = msg.op {
                 bind_response
-            }else{
+            } else {
                 break Err(to_js_error!("Invalid response type,expected BindResponse"));
             };
 
@@ -375,7 +376,10 @@ impl LdapSession {
                 }
                 LdapResultCode::SaslBindInProgress => {
                     if let Some(ref cred) = bind_response.saslcreds {
-                        let ntlm_token = auth_provider.step(cred).await.map_err(|e| to_js_error!("Unable to get ntlm token: {:?}", e))?;
+                        let ntlm_token = auth_provider
+                            .step(cred)
+                            .await
+                            .map_err(|e| to_js_error!("Unable to get ntlm token: {:?}", e))?;
                         let msg = LdapMsg {
                             msgid: self.next_message_id(),
                             op: LdapOp::BindRequest(LdapBindRequest {
@@ -388,7 +392,10 @@ impl LdapSession {
                             ctrl: vec![],
                         };
 
-                        frame.send(msg).await.map_err(|e| to_js_error!("Unable to send bind request -> {:?}",e))?;
+                        frame
+                            .send(msg)
+                            .await
+                            .map_err(|e| to_js_error!("Unable to send bind request -> {:?}", e))?;
                     }
                 }
                 _ => {
