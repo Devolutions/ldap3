@@ -1,8 +1,8 @@
 use futures_util::future::LocalBoxFuture;
 use sspi::{
-    builders::EmptyInitializeSecurityContext, AuthIdentity, ClientRequestFlags,
-    CredentialUse, DataRepresentation, KerberosConfig, Negotiate, NegotiateConfig, SecurityBuffer,
-    SecurityBufferType, SecurityStatus, Sspi, SspiImpl, Username,
+    builders::EmptyInitializeSecurityContext, ntlm::NtlmConfig, AuthIdentity, ClientRequestFlags,
+    CredentialUse, DataRepresentation, KerberosConfig, Negotiate, NegotiateConfig, Ntlm,
+    SecurityBuffer, SecurityBufferType, SecurityStatus, Sspi, SspiImpl, Username,
 };
 use tracing::debug;
 
@@ -17,19 +17,32 @@ impl NegotiateAuthProvier {
     pub(crate) fn new(
         ldap_username: &str,
         ldap_password: &str,
-        domain: &str,
-        kdc_proxy_url: &str,
+        domain: Option<&str>,
+        kdc_proxy_url: Option<&str>,
         client_computer_name: &str,
         server_computer_name: &str,
     ) -> Self {
         let identity = AuthIdentity {
-            username: Username::new(ldap_username, Some(domain)).unwrap(),
+            username: Username::new(ldap_username, domain).unwrap(),
             password: ldap_password.to_string().into(),
         };
 
-        let kerb_config = KerberosConfig::new(kdc_proxy_url, client_computer_name.to_string());
-        let negotiate_config =
-            NegotiateConfig::from_protocol_config(Box::new(kerb_config), client_computer_name.to_string());
+        let negotiate_config = match kdc_proxy_url {
+            Some(url) => {
+                let kerb_config = KerberosConfig::new(url, client_computer_name.to_string());
+                NegotiateConfig::from_protocol_config(
+                    Box::new(kerb_config),
+                    client_computer_name.to_string(),
+                )
+            }
+            None => {
+                let ntlm_config = NtlmConfig::new(client_computer_name.to_string());
+                NegotiateConfig::from_protocol_config(
+                    Box::new(ntlm_config),
+                    client_computer_name.to_string(),
+                )
+            }
+        };
 
         let mut negotiate = Negotiate::new(negotiate_config).unwrap();
 
@@ -72,7 +85,9 @@ impl SecurityProvider for NegotiateAuthProvier {
 
             let result = {
                 let clinet = WasmNetworkClient;
-                let mut generator = self.negotiate.initialize_security_context_impl(&mut builder);
+                let mut generator = self
+                    .negotiate
+                    .initialize_security_context_impl(&mut builder);
                 let mut state = generator.start();
 
                 loop {
