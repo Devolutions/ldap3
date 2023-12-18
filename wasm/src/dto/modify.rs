@@ -4,7 +4,7 @@ use ldap3_proto::proto::{LdapModify, LdapModifyType};
 use serde::{Deserialize, Serialize};
 use tsify::Tsify;
 
-use crate::schema::search_objects::Attribute;
+use super::search::Attribute;
 
 #[derive(Debug, Serialize, Deserialize, Tsify)]
 #[tsify(into_wasm_abi, from_wasm_abi)]

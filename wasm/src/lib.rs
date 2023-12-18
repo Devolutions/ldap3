@@ -2,10 +2,9 @@ use tracing::Level;
 use wasm_bindgen::{prelude::wasm_bindgen, JsValue};
 
 pub mod authentication;
-pub mod control;
 pub mod error;
 pub mod ldap_session;
-pub mod modify;
+pub mod dto;
 pub mod schema;
 pub mod search;
 #[cfg(test)]

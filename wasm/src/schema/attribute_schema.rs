@@ -1,3 +1,4 @@
+#![allow(non_snake_case)]
 use anyhow::Result;
 use wasm_bindgen::prelude::*;
 
@@ -6,11 +7,10 @@ use tracing::debug;
 
 use tsify::Tsify;
 
+use crate::dto::search::AttributeValue;
 use crate::error::JsErrorValue;
 use crate::{to_js_error, JsResult};
 use enum_assoc::Assoc;
-
-use super::search_objects::AttributeValue;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Assoc, Tsify)]
 #[tsify(into_wasm_abi, from_wasm_abi)]

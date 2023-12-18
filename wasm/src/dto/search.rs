@@ -1,8 +1,10 @@
+#![allow(non_snake_case)]
 use ldap3_proto::{proto::LdapResult, LdapPartialAttribute, LdapSearchResultEntry};
 use serde::{Deserialize, Serialize};
 use tsify::Tsify;
 
-use crate::control::LdapControlArray;
+use super::control::LdapControlArray;
+
 
 #[derive(Debug, Serialize, Deserialize, Tsify)]
 #[serde(untagged)]

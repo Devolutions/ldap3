@@ -13,12 +13,12 @@ use tokio::sync::Mutex;
 use tracing::info;
 use wasm_bindgen::prelude::*;
 
-use crate::ldap_session::JsLdapSearchScope;
+use crate::{ldap_session::JsLdapSearchScope, dto::search::{SearchMessage, SearchOperation}};
 use crate::{
     call_js_function, call_js_function_serde,
-    schema::search_objects::{SearchMessage, SearchOperation},
     to_js_error, JsResult,
 };
+
 use crate::{error::JsErrorValue, ldap_session::LdapFrame};
 
 #[wasm_bindgen]

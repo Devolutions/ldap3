@@ -5,7 +5,7 @@ use crate::{
         kerberos::KerberoAuthProvier, negotiate::NegotiateAuthProvier, ntlm::NtlmAuthProvier,
         SecurityProvider,
     },
-    error::JsErrorValue,
+    error::JsErrorValue, dto::control::LdapControlArray,
 };
 use async_io_stream::IoStream;
 use futures_util::sink::SinkExt;
@@ -31,10 +31,8 @@ use wasm_bindgen::prelude::*;
 use ws_stream_wasm::WsStreamIo;
 
 use crate::{
-    control::LdapControlArray,
-    modify::ModifyRequest,
+    dto::modify::ModifyRequest,
     return_msg_if_type_matches,
-    schema::search_objects::AttributesArray,
     search::{LdapSearchResultStream, LdapSearchStreamBuilder},
     send_message,
 };
@@ -128,7 +126,7 @@ impl LdapSession {
     pub async fn add(
         &mut self,
         dn: String,
-        attributes: AttributesArray,
+        attributes: crate::dto::search::AttributesArray,
         controls: Option<LdapControlArray>,
     ) -> JsResult<JsValue> {
         let request = LdapAddRequest {
@@ -191,7 +189,7 @@ impl LdapSession {
     pub async fn modify(
         &mut self,
         dn: String,
-        modifies: crate::modify::BinaryLdapModifies,
+        modifies: crate::dto::modify::BinaryLdapModifies,
         controls: Option<LdapControlArray>,
     ) -> JsResult<JsValue> {
         let deserialized_modify: Vec<ModifyRequest> = modifies.into();
