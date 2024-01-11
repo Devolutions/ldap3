@@ -1,8 +1,8 @@
 use futures_util::future::LocalBoxFuture;
 use sspi::{
     builders::EmptyInitializeSecurityContext, AuthIdentity, ClientRequestFlags, CredentialUse,
-    DataRepresentation, Ntlm, SecurityBuffer, SecurityBufferType,
-    SecurityStatus, Sspi, SspiImpl, Username,
+    DataRepresentation, Ntlm, SecurityBuffer, SecurityBufferType, SecurityStatus, Sspi, SspiImpl,
+    Username,
 };
 
 use super::{SecurityProvider, StepResult};
@@ -13,7 +13,11 @@ pub(crate) struct NtlmAuthProvier {
 }
 
 impl NtlmAuthProvier {
-    pub(crate) fn new(ldap_username: &str, ldap_password: &str, server_computer_name:&str) -> Self {
+    pub(crate) fn new(
+        ldap_username: &str,
+        ldap_password: &str,
+        server_computer_name: &str,
+    ) -> Self {
         let identity = AuthIdentity {
             username: Username::parse(ldap_username).unwrap(),
             password: ldap_password.to_string().into(),

@@ -1,8 +1,8 @@
 use futures_util::future::LocalBoxFuture;
 use sspi::{
     builders::EmptyInitializeSecurityContext, ntlm::NtlmConfig, AuthIdentity, ClientRequestFlags,
-    CredentialUse, DataRepresentation, KerberosConfig, Negotiate, NegotiateConfig, Ntlm,
-    SecurityBuffer, SecurityBufferType, SecurityStatus, Sspi, SspiImpl, Username,
+    CredentialUse, DataRepresentation, KerberosConfig, Negotiate, NegotiateConfig, SecurityBuffer,
+    SecurityBufferType, SecurityStatus, Sspi, SspiImpl, Username,
 };
 use tracing::debug;
 

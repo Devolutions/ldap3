@@ -137,7 +137,6 @@ impl LdapSyntax {
             _ => vec![],
         }
     }
-
 }
 
 #[wasm_bindgen]
@@ -191,7 +190,7 @@ impl LdapParser {
             | LdapSyntax::ObjectOrName
             | LdapSyntax::ObjectAccessPoint
             | LdapSyntax::ObjectPresentationAddress
-            | LdapSyntax::ObjectReplicaLink 
+            | LdapSyntax::ObjectReplicaLink
             | LdapSyntax::Integer // this is funny, MSDoc says it is a 32 bit integer, but it is actually a string
             | LdapSyntax::LargeInteger // so is this
             | LdapSyntax::Enumeration
@@ -318,46 +317,47 @@ impl LdapSyntax {
 #[wasm_bindgen]
 impl LdapParser {
     pub fn to_string(attribute_value: AttributeValue) -> JsResult<Vec<String>> {
-        let bytes_arr:Vec<Vec<u8>> = attribute_value.into();
+        let bytes_arr: Vec<Vec<u8>> = attribute_value.into();
         let strings = bytes_arr
             .into_iter()
             .map(|v| String::from_utf8(v).map_err(|e| anyhow::anyhow!("{:?}", e)))
-            .collect::<Result<Vec<_>, _>>().map_err(|e| to_js_error!("{:?}", e))?;
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| to_js_error!("{:?}", e))?;
         Ok(strings)
     }
 
     pub fn to_date(attribute_value: AttributeValue) -> JsResult<Vec<js_sys::Date>> {
-        let bytes_arr:Vec<Vec<u8>> = attribute_value.into();
+        let bytes_arr: Vec<Vec<u8>> = attribute_value.into();
         let strings = bytes_arr
             .into_iter()
             .map(|v| String::from_utf8(v).map_err(|e| anyhow::anyhow!("{:?}", e)))
-            .collect::<Result<Vec<_>, _>>().map_err(|e| to_js_error!("{:?}", e))?;
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| to_js_error!("{:?}", e))?;
         let dates = strings
             .into_iter()
             .map(LdapSyntax::string_to_js_date_generialized_time)
-            .collect::<Result<Vec<_>>>().map_err(|e| to_js_error!("{:?}", e))?;
+            .collect::<Result<Vec<_>>>()
+            .map_err(|e| to_js_error!("{:?}", e))?;
         Ok(dates)
     }
 
     pub fn to_uint_8_array(attribute_value: AttributeValue) -> JsResult<Vec<js_sys::Uint8Array>> {
-        let bytes_arr:Vec<Vec<u8>> = attribute_value.into();
+        let bytes_arr: Vec<Vec<u8>> = attribute_value.into();
         let uint8arr = bytes_arr
             .into_iter()
-            .map(|v| {
-                js_sys::Uint8Array::from(v.as_slice())
-            })
+            .map(|v| js_sys::Uint8Array::from(v.as_slice()))
             .collect::<Vec<_>>();
         Ok(uint8arr)
     }
 
     pub fn to_boolean(attribute_value: AttributeValue) -> JsResult<JsBooleans> {
-        let bytes_arr:Vec<Vec<u8>> = attribute_value.into();
+        let bytes_arr: Vec<Vec<u8>> = attribute_value.into();
         let res = bytes_arr
             .into_iter()
             .map(|v| String::from_utf8(v).map_err(|_| to_js_error!("Invalid UTF-8 bytes")))
-            .map(|v| Ok(v?=="TRUE"))
+            .map(|v| Ok(v? == "TRUE"))
             .collect::<Result<Vec<_>, JsValue>>()?;
-            
+
         Ok(res.into())
     }
 }

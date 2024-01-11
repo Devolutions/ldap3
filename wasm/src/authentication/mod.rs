@@ -1,23 +1,20 @@
-
-
 use futures_util::future::LocalBoxFuture;
 
 use sspi::{generator::NetworkRequest, network_client::NetworkProtocol};
 use tracing::debug;
 
-
-pub mod ntlm;
 pub mod kerberos;
 pub mod negotiate;
+pub mod ntlm;
 
 /*
 We are not seeking to implement GSSAPI encryption/decryption, at this time.
 We will use LDAP over TLS, instead.
 */
 pub type StepResult = Result<Vec<u8>, Box<dyn std::error::Error>>;
-pub trait SecurityProvider { 
+pub trait SecurityProvider {
     // we are using wasm, so we dont need Send on the future, LocalBoxFuture is fine
-    fn step<'a>(&'a mut self, input: &'a [u8]) -> LocalBoxFuture<'a,StepResult>;  
+    fn step<'a>(&'a mut self, input: &'a [u8]) -> LocalBoxFuture<'a, StepResult>;
 }
 
 #[derive(Debug)]
@@ -41,7 +38,7 @@ impl WasmNetworkClient {
                     .await
                     .unwrap()
             }
-            _  => panic!("unsupported protocol for KDC proxy")
+            _ => panic!("unsupported protocol for KDC proxy"),
         }
     }
 }

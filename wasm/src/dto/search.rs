@@ -5,7 +5,6 @@ use tsify::Tsify;
 
 use super::control::LdapControlArray;
 
-
 #[derive(Debug, Serialize, Deserialize, Tsify)]
 #[serde(untagged)]
 #[tsify(into_wasm_abi, from_wasm_abi)]

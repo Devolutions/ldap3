@@ -13,7 +13,8 @@ use uuid::Uuid;
 use crate::{
     bytes_to_string,
     error::LdapProtoError,
-    proto::{ber_bool_to_bool, ber_integer_to_i64, SyncRequestMode, SyncStateValue}, LdapResultCode,
+    proto::{ber_bool_to_bool, ber_integer_to_i64, SyncRequestMode, SyncStateValue},
+    LdapResultCode,
 };
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -62,7 +63,7 @@ pub enum LdapControl {
     },
 }
 
-#[derive(Debug, Clone, PartialEq,Hash, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Hash, Eq, PartialOrd, Ord)]
 #[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
 pub struct ServerSortResult {

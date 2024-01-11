@@ -376,17 +376,16 @@ impl LdapSession {
                 }
                 LdapResultCode::SaslBindInProgress => {
                     if let Some(ref cred) = bind_response.saslcreds {
-                        let ntlm_token = auth_provider
-                            .step(cred)
-                            .await
-                            .map_err(|e| to_js_error!("Unable to get ntlm token: {:?}", e))?;
+                        let token = auth_provider.step(cred).await.map_err(|e| {
+                            to_js_error!("error in accepting incoming sasl token :{:?}", e)
+                        })?;
                         let msg = LdapMsg {
                             msgid: self.next_message_id(),
                             op: LdapOp::BindRequest(LdapBindRequest {
                                 dn: String::default(),
                                 cred: LdapBindCred::SASL(SaslCredentials {
                                     mechanism: "GSS-SPNEGO".to_string(),
-                                    credentials: ntlm_token,
+                                    credentials: token,
                                 }),
                             }),
                             ctrl: vec![],
@@ -395,11 +394,11 @@ impl LdapSession {
                         frame
                             .send(msg)
                             .await
-                            .map_err(|e| to_js_error!("Unable to send bind request -> {:?}", e))?;
+                            .map_err(|e| to_js_error!("unable to send bind request -> {:?}", e))?;
                     }
                 }
                 _ => {
-                    break Err(to_js_error!("Bind failed: {:?}", bind_response));
+                    break Err(to_js_error!("bind failed: {:?}", bind_response));
                 }
             }
         }
