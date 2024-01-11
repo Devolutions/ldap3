@@ -2,15 +2,20 @@ use futures_util::future::LocalBoxFuture;
 use sspi::{
     builders::EmptyInitializeSecurityContext, AuthIdentity, ClientRequestFlags, CredentialUse,
     DataRepresentation, Kerberos, KerberosConfig, SecurityBuffer, SecurityBufferType,
-    SecurityStatus, Sspi, SspiImpl, Username,
+    SecurityStatus, Sspi, SspiImpl, Username, EncryptionFlags,
 };
 use tracing::debug;
+
+use crate::JsResult;
 
 use super::{SecurityProvider, StepResult, WasmNetworkClient};
 pub struct KerberoAuthProvier {
     kerbero: Kerberos,
     credentials_handle: <Kerberos as SspiImpl>::CredentialsHandle,
     server_computer_name: String,
+    sign: Option<bool>,
+    seal: Option<bool>,
+    sequence_number: u32,
 }
 
 impl KerberoAuthProvier {
@@ -22,6 +27,8 @@ impl KerberoAuthProvier {
         kdc_proxy_url: &str,
         client_computer_name: &str,
         server_computer_name: &str,
+        sign: Option<bool>,
+        seal: Option<bool>,
     ) -> Self {
         let identity = AuthIdentity {
             username: Username::new(ldap_username, Some(domain)).unwrap(),
@@ -43,7 +50,15 @@ impl KerberoAuthProvier {
             kerbero,
             credentials_handle: acq_cred_result.credentials_handle,
             server_computer_name: server_computer_name.to_string(),
+            sign,
+            seal,
+            sequence_number: 0,
         }
+    }
+    fn next_sequence_number(&mut self) -> u32 {
+        let res = self.sequence_number;
+        self.sequence_number += 1;
+        res
     }
 }
 
@@ -58,12 +73,21 @@ impl SecurityProvider for KerberoAuthProvier {
                 SecurityBufferType::Token,
             )];
             let target_name = format!("LDAP/{}", self.server_computer_name);
+
+            let mut flag = ClientRequestFlags::ALLOCATE_MEMORY | ClientRequestFlags::MUTUAL_AUTH;
+
+            if self.sign.unwrap_or(false) {
+                flag |= ClientRequestFlags::INTEGRITY;
+            }
+
+            if self.seal.unwrap_or(false) {
+                flag |= ClientRequestFlags::CONFIDENTIALITY;
+            }
+
             let mut builder =
                 EmptyInitializeSecurityContext::<<Kerberos as SspiImpl>::CredentialsHandle>::new()
                     .with_credentials_handle(&mut self.credentials_handle)
-                    .with_context_requirements(
-                        ClientRequestFlags::ALLOCATE_MEMORY | ClientRequestFlags::MUTUAL_AUTH,
-                    )
+                    .with_context_requirements(flag)
                     .with_target_data_representation(DataRepresentation::Native)
                     .with_target_name(&target_name)
                     .with_input(&mut input_buffer)
@@ -97,5 +121,21 @@ impl SecurityProvider for KerberoAuthProvier {
 
             Ok(output_buffer[0].buffer.clone())
         })
+    }
+
+    fn encrypt(&mut self, input: Vec<u8>) -> Result<Vec<u8>,Box<dyn std::error::Error>> {
+        let mut msg_buffer = vec![SecurityBuffer::new(input, SecurityBufferType::Stream)];
+
+        let seq = self.next_sequence_number();
+        self.kerbero
+            .encrypt_message(EncryptionFlags::empty(), &mut msg_buffer, seq)?;
+        Ok(msg_buffer[0].buffer.clone())
+    }
+
+    fn decrypt(&mut self, input: Vec<u8>) -> Result<Vec<u8>,Box<dyn std::error::Error>> {
+        let mut msg_buffer = vec![SecurityBuffer::new(input, SecurityBufferType::Stream)];
+        let seq = self.next_sequence_number();
+        self.kerbero.decrypt_message(&mut msg_buffer, seq)?;
+        Ok(msg_buffer[0].buffer.clone())
     }
 }

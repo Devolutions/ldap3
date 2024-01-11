@@ -49,14 +49,16 @@ pub struct LdapSession {
 #[wasm_bindgen]
 pub struct LdapSessionParameters {
     server_address_ws_proxy: String,
+    use_encryption: bool,
 }
 
 #[wasm_bindgen]
 impl LdapSessionParameters {
     #[wasm_bindgen(constructor)]
-    pub fn new(server_address_ws_proxy: String) -> Self {
+    pub fn new(server_address_ws_proxy: String, use_encryption: bool) -> Self {
         Self {
             server_address_ws_proxy,
+            use_encryption: use_encryption,
         }
     }
 }
@@ -245,6 +247,8 @@ pub struct SaslBindConfig {
     pub password: String,
     pub auth_method: SspiAuthMethod,
     pub controls: Option<LdapControlArray>,
+    pub sign: Option<bool>,
+    pub seal: Option<bool>,
 }
 
 #[wasm_bindgen]
@@ -270,7 +274,7 @@ impl LdapSession {
                 ldap3_proto::proto::LdapResultCode::Success => {
                     Ok(serde_wasm_bindgen::to_value(&res)?)
                 }
-                _ => Err(serde_wasm_bindgen::to_value(&res)?),
+                _ => Err(to_js_error!("Bind failed : {:?}", bind_response)),
             },
             _ => Err(to_js_error!("Invalid response")),
         }
@@ -298,6 +302,8 @@ impl LdapSession {
             password,
             auth_method,
             controls,
+            sign,
+            seal,
         } = config;
 
         let mut auth_provider: Box<dyn SecurityProvider> = match auth_method {
@@ -307,6 +313,8 @@ impl LdapSession {
                 &username,
                 &password,
                 &server_computer_name,
+                sign,
+                seal,
             )),
             SspiAuthMethod::Kerberos {
                 domain,
@@ -319,6 +327,8 @@ impl LdapSession {
                 &kdc_proxy_url,
                 &server_computer_name,
                 &server_computer_name,
+                sign,
+                seal,
             )),
             SspiAuthMethod::Negotiate {
                 domain,
@@ -331,6 +341,8 @@ impl LdapSession {
                 kdc_proxy_url.as_deref(),
                 &server_computer_name,
                 &server_computer_name,
+                sign,
+                seal,
             )),
         };
 
@@ -371,7 +383,7 @@ impl LdapSession {
 
             match bind_response.res.code {
                 LdapResultCode::Success => {
-                    println!("Bind successful");
+                    tracing::trace!("bind success");
                     break Ok(serde_wasm_bindgen::to_value(&bind_response)?);
                 }
                 LdapResultCode::SaslBindInProgress => {

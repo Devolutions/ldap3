@@ -89,7 +89,7 @@ impl LdapSearchResultStream {
                     _ => {
                         break Err(to_js_error!(
                             "Invalid response type, either search is rejected or the lock on websocket has failed"
-                        ));
+                        ).into());
                     }
                 };
             };
