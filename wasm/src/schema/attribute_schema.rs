@@ -356,7 +356,7 @@ impl LdapParser {
             .into_iter()
             .map(|v| String::from_utf8(v).map_err(|_| to_js_error!("Invalid UTF-8 bytes")))
             .map(|v| Ok(v? == "TRUE"))
-            .collect::<Result<Vec<_>, JsValue>>()?;
+            .collect::<Result<Vec<_>, JsErrorValue>>()?;
 
         Ok(res.into())
     }

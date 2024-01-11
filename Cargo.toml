@@ -4,7 +4,7 @@ lto = "thin"
 
 [workspace]
 resolver = "2"
-members = ["proto", "client", "cli", "wasm"]
+members = ["proto", "client", "cli", "wasm","async-client"]
 
 
 [workspace.package]

@@ -13,8 +13,23 @@ pub struct JsErrorValue {
 #[macro_export]
 macro_rules! to_js_error {
     ($($arg:tt)*) => {
-        JsErrorValue::new(format!($($arg)*).as_str()).to_js_value()
+        JsErrorValue::new(format!($($arg)*).as_str())
     };
+}
+
+impl From<JsErrorValue> for JsValue {
+    fn from(val: JsErrorValue) -> Self {
+        val.to_js_value()
+    }
+}
+
+impl<T> From<T> for JsErrorValue
+where
+    T: std::error::Error,
+{
+    fn from(error: T) -> Self {
+        JsErrorValue::new(error.to_string())
+    }
 }
 
 impl JsErrorValue {
@@ -34,11 +49,7 @@ impl JsErrorValue {
         let res = serde_wasm_bindgen::to_value(self);
         match res {
             Ok(js_value) => js_value,
-            Err(error) => to_js_error!(
-                "failed to serialize {:?}, the original error message is {:?}",
-                error,
-                self.error
-            ),
+            Err(_error) => JsValue::from_str("error serializing errors, this should never happen"),
         }
     }
 }

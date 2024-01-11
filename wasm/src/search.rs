@@ -45,6 +45,7 @@ impl LdapSearchResultStream {
 
         let future = Box::pin(async move {
             let mut locked_frame = frame.lock().await;
+            tracing::info!("sending search request {:?}", request_message);
             let res = locked_frame
                 .send(request_message)
                 .await
@@ -89,7 +90,7 @@ impl LdapSearchResultStream {
                     _ => {
                         break Err(to_js_error!(
                             "Invalid response type, either search is rejected or the lock on websocket has failed"
-                        ));
+                        ).into());
                     }
                 };
             };

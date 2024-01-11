@@ -6,6 +6,7 @@ use crate::{
         SecurityProvider,
     },
     dto::control::LdapControlArray,
+    encryption_codec::{EncryptioinOption, EncryptionCodec},
     error::JsErrorValue,
 };
 use async_io_stream::IoStream;
@@ -19,7 +20,7 @@ use ldap3_proto::{
         LdapAddRequest, LdapBindCred, LdapBindRequest, LdapModify, LdapModifyRequest, LdapOp,
         SaslCredentials,
     },
-    LdapCodec, LdapMsg, LdapResultCode, LdapSearchScope,
+    LdapMsg, LdapResultCode, LdapSearchScope,
 };
 
 use serde::{Deserialize, Serialize};
@@ -39,7 +40,7 @@ use crate::{
 };
 use crate::{to_js_error, JsResult};
 
-pub(crate) type LdapFrame = Framed<IoStream<WsStreamIo, Vec<u8>>, LdapCodec>;
+pub(crate) type LdapFrame = Framed<IoStream<WsStreamIo, Vec<u8>>, EncryptionCodec>;
 #[wasm_bindgen]
 pub struct LdapSession {
     frame: Arc<Mutex<LdapFrame>>,
@@ -88,7 +89,7 @@ impl LdapSession {
                 .map_err(|e| to_js_error!("Failed to connect to server : {:?}", e))?;
         let io_stream = ws_stream_wasm.into_io();
 
-        let framed = Framed::new(io_stream, LdapCodec::default());
+        let framed = Framed::new(io_stream, EncryptionCodec::default());
         let session = LdapSession {
             frame: Arc::new(Mutex::new(framed)),
             message_id: 0,
@@ -245,6 +246,8 @@ pub struct SaslBindConfig {
     pub password: String,
     pub auth_method: SspiAuthMethod,
     pub controls: Option<LdapControlArray>,
+    pub sign: Option<bool>,
+    pub seal: Option<bool>,
 }
 
 #[wasm_bindgen]
@@ -270,7 +273,7 @@ impl LdapSession {
                 ldap3_proto::proto::LdapResultCode::Success => {
                     Ok(serde_wasm_bindgen::to_value(&res)?)
                 }
-                _ => Err(serde_wasm_bindgen::to_value(&res)?),
+                _ => Err(to_js_error!("Bind failed : {:?}", bind_response)),
             },
             _ => Err(to_js_error!("Invalid response")),
         }
@@ -298,6 +301,8 @@ impl LdapSession {
             password,
             auth_method,
             controls,
+            sign,
+            seal,
         } = config;
 
         let mut auth_provider: Box<dyn SecurityProvider> = match auth_method {
@@ -307,6 +312,8 @@ impl LdapSession {
                 &username,
                 &password,
                 &server_computer_name,
+                sign,
+                seal,
             )),
             SspiAuthMethod::Kerberos {
                 domain,
@@ -319,6 +326,8 @@ impl LdapSession {
                 &kdc_proxy_url,
                 &server_computer_name,
                 &server_computer_name,
+                sign,
+                seal,
             )),
             SspiAuthMethod::Negotiate {
                 domain,
@@ -331,6 +340,8 @@ impl LdapSession {
                 kdc_proxy_url.as_deref(),
                 &server_computer_name,
                 &server_computer_name,
+                sign,
+                seal,
             )),
         };
 
@@ -371,7 +382,10 @@ impl LdapSession {
 
             match bind_response.res.code {
                 LdapResultCode::Success => {
-                    println!("Bind successful");
+                    tracing::trace!("bind success");
+                    frame
+                        .codec_mut()
+                        .set_encryption(EncryptioinOption::Encryption(auth_provider));
                     break Ok(serde_wasm_bindgen::to_value(&bind_response)?);
                 }
                 LdapResultCode::SaslBindInProgress => {

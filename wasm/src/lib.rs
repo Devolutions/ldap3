@@ -1,8 +1,10 @@
+use error::JsErrorValue;
 use tracing::Level;
-use wasm_bindgen::{prelude::wasm_bindgen, JsValue};
+use wasm_bindgen::prelude::wasm_bindgen;
 
 pub mod authentication;
 pub mod dto;
+pub mod encryption_codec;
 pub mod error;
 pub mod ldap_session;
 pub mod schema;
@@ -12,7 +14,7 @@ mod test;
 pub mod types;
 pub mod utils;
 
-pub type JsResult<T> = Result<T, JsValue>;
+pub type JsResult<T> = Result<T, JsErrorValue>;
 
 #[macro_export]
 macro_rules! call_js_function {
