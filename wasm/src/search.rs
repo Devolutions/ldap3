@@ -45,6 +45,7 @@ impl LdapSearchResultStream {
 
         let future = Box::pin(async move {
             let mut locked_frame = frame.lock().await;
+            tracing::info!("sending search request {:?}", request_message);
             let res = locked_frame
                 .send(request_message)
                 .await

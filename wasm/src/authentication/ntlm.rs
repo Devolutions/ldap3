@@ -1,4 +1,5 @@
 use futures_util::future::LocalBoxFuture;
+use serde::de;
 use sspi::{
     builders::EmptyInitializeSecurityContext, AuthIdentity, ClientRequestFlags, CredentialUse,
     DataRepresentation, EncryptionFlags, Ntlm, SecurityBuffer, SecurityBufferType, SecurityStatus,
@@ -104,18 +105,29 @@ impl SecurityProvider for NtlmAuthProvier {
         })
     }
 
-    fn encrypt(&mut self, input: Vec<u8>) -> Result<Vec<u8>,Box<dyn std::error::Error>> {
-        let mut msg_buffer = vec![SecurityBuffer::new(
-            input.to_vec(),
-            SecurityBufferType::Stream,
-        )];
+    fn encrypt(&mut self, input: Vec<u8>) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+        let mut msg_buffer = vec![
+            SecurityBuffer::new(Vec::new(), SecurityBufferType::Token),
+            SecurityBuffer::new(input.to_vec(), SecurityBufferType::Data),
+            SecurityBuffer::new(Vec::new(), SecurityBufferType::Padding),
+        ];
         let seq = self.next_sequence_number();
         self.ntlm
             .encrypt_message(EncryptionFlags::empty(), &mut msg_buffer, seq)?;
-        Ok(msg_buffer[0].buffer.clone())
+
+        let mut output = Vec::new();
+        let length = msg_buffer[0].buffer.len() as u32
+            + msg_buffer[1].buffer.len() as u32
+            + msg_buffer[2].buffer.len() as u32;
+        let length_bytes = length.to_be_bytes();
+        output.extend_from_slice(&length_bytes);
+        output.extend_from_slice(&msg_buffer[0].buffer);
+        output.extend_from_slice(&msg_buffer[1].buffer);
+        output.extend_from_slice(&msg_buffer[2].buffer);
+        Ok(output)
     }
 
-    fn decrypt(&mut self, input: Vec<u8>) -> Result<Vec<u8>,Box<dyn std::error::Error>> {
+    fn decrypt(&mut self, input: Vec<u8>) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
         let mut msg_buffer = vec![SecurityBuffer::new(
             input.to_vec(),
             SecurityBufferType::Stream,

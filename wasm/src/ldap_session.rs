@@ -6,7 +6,7 @@ use crate::{
         SecurityProvider,
     },
     dto::control::LdapControlArray,
-    error::JsErrorValue,
+    error::JsErrorValue, encryption_codec::{EncryptionCodec, EncryptioinOption},
 };
 use async_io_stream::IoStream;
 use futures_util::sink::SinkExt;
@@ -39,7 +39,7 @@ use crate::{
 };
 use crate::{to_js_error, JsResult};
 
-pub(crate) type LdapFrame = Framed<IoStream<WsStreamIo, Vec<u8>>, LdapCodec>;
+pub(crate) type LdapFrame = Framed<IoStream<WsStreamIo, Vec<u8>>, EncryptionCodec>;
 #[wasm_bindgen]
 pub struct LdapSession {
     frame: Arc<Mutex<LdapFrame>>,
@@ -49,16 +49,14 @@ pub struct LdapSession {
 #[wasm_bindgen]
 pub struct LdapSessionParameters {
     server_address_ws_proxy: String,
-    use_encryption: bool,
 }
 
 #[wasm_bindgen]
 impl LdapSessionParameters {
     #[wasm_bindgen(constructor)]
-    pub fn new(server_address_ws_proxy: String, use_encryption: bool) -> Self {
+    pub fn new(server_address_ws_proxy: String) -> Self {
         Self {
             server_address_ws_proxy,
-            use_encryption: use_encryption,
         }
     }
 }
@@ -90,7 +88,7 @@ impl LdapSession {
                 .map_err(|e| to_js_error!("Failed to connect to server : {:?}", e))?;
         let io_stream = ws_stream_wasm.into_io();
 
-        let framed = Framed::new(io_stream, LdapCodec::default());
+        let framed = Framed::new(io_stream, EncryptionCodec::default());
         let session = LdapSession {
             frame: Arc::new(Mutex::new(framed)),
             message_id: 0,
@@ -384,6 +382,9 @@ impl LdapSession {
             match bind_response.res.code {
                 LdapResultCode::Success => {
                     tracing::trace!("bind success");
+                    frame.codec_mut().set_encryption(EncryptioinOption::Encryption(
+                        auth_provider
+                    ));
                     break Ok(serde_wasm_bindgen::to_value(&bind_response)?);
                 }
                 LdapResultCode::SaslBindInProgress => {

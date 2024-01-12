@@ -12,7 +12,7 @@ pub mod search;
 mod test;
 pub mod types;
 pub mod utils;
-pub mod encryption_stream;
+pub mod encryption_codec;
 
 pub type JsResult<T> = Result<T, JsErrorValue>;
 
