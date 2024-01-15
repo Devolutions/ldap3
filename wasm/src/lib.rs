@@ -1,9 +1,10 @@
 use error::JsErrorValue;
 use tracing::Level;
-use wasm_bindgen::{prelude::wasm_bindgen, JsValue};
+use wasm_bindgen::prelude::wasm_bindgen;
 
 pub mod authentication;
 pub mod dto;
+pub mod encryption_codec;
 pub mod error;
 pub mod ldap_session;
 pub mod schema;
@@ -12,7 +13,6 @@ pub mod search;
 mod test;
 pub mod types;
 pub mod utils;
-pub mod encryption_codec;
 
 pub type JsResult<T> = Result<T, JsErrorValue>;
 

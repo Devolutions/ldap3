@@ -17,9 +17,9 @@ macro_rules! to_js_error {
     };
 }
 
-impl Into<JsValue> for JsErrorValue {
-    fn into(self) -> JsValue {
-        self.to_js_value()
+impl From<JsErrorValue> for JsValue {
+    fn from(val: JsErrorValue) -> Self {
+        val.to_js_value()
     }
 }
 
@@ -49,7 +49,7 @@ impl JsErrorValue {
         let res = serde_wasm_bindgen::to_value(self);
         match res {
             Ok(js_value) => js_value,
-            Err(error) => JsValue::from_str("error serializing errors, this should never happen"),
+            Err(_error) => JsValue::from_str("error serializing errors, this should never happen"),
         }
     }
 }

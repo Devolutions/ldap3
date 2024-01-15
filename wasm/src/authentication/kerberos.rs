@@ -1,12 +1,10 @@
 use futures_util::future::LocalBoxFuture;
 use sspi::{
     builders::EmptyInitializeSecurityContext, AuthIdentity, ClientRequestFlags, CredentialUse,
-    DataRepresentation, Kerberos, KerberosConfig, SecurityBuffer, SecurityBufferType,
-    SecurityStatus, Sspi, SspiImpl, Username, EncryptionFlags,
+    DataRepresentation, EncryptionFlags, Kerberos, KerberosConfig, SecurityBuffer,
+    SecurityBufferType, SecurityStatus, Sspi, SspiImpl, Username,
 };
 use tracing::debug;
-
-use crate::JsResult;
 
 use super::{SecurityProvider, StepResult, WasmNetworkClient};
 pub struct KerberoAuthProvier {
@@ -123,7 +121,7 @@ impl SecurityProvider for KerberoAuthProvier {
         })
     }
 
-    fn encrypt(&mut self, input: Vec<u8>) -> Result<Vec<u8>,Box<dyn std::error::Error>> {
+    fn encrypt(&mut self, input: Vec<u8>) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
         let mut msg_buffer = vec![SecurityBuffer::new(input, SecurityBufferType::Stream)];
 
         let seq = self.next_sequence_number();
@@ -132,7 +130,7 @@ impl SecurityProvider for KerberoAuthProvier {
         Ok(msg_buffer[0].buffer.clone())
     }
 
-    fn decrypt(&mut self, input: Vec<u8>) -> Result<Vec<u8>,Box<dyn std::error::Error>> {
+    fn decrypt(&mut self, input: Vec<u8>) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
         let mut msg_buffer = vec![SecurityBuffer::new(input, SecurityBufferType::Stream)];
         let seq = self.next_sequence_number();
         self.kerbero.decrypt_message(&mut msg_buffer, seq)?;

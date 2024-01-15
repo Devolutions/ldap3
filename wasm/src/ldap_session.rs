@@ -6,7 +6,8 @@ use crate::{
         SecurityProvider,
     },
     dto::control::LdapControlArray,
-    error::JsErrorValue, encryption_codec::{EncryptionCodec, EncryptioinOption},
+    encryption_codec::{EncryptioinOption, EncryptionCodec},
+    error::JsErrorValue,
 };
 use async_io_stream::IoStream;
 use futures_util::sink::SinkExt;
@@ -19,7 +20,7 @@ use ldap3_proto::{
         LdapAddRequest, LdapBindCred, LdapBindRequest, LdapModify, LdapModifyRequest, LdapOp,
         SaslCredentials,
     },
-    LdapCodec, LdapMsg, LdapResultCode, LdapSearchScope,
+    LdapMsg, LdapResultCode, LdapSearchScope,
 };
 
 use serde::{Deserialize, Serialize};
@@ -382,9 +383,9 @@ impl LdapSession {
             match bind_response.res.code {
                 LdapResultCode::Success => {
                     tracing::trace!("bind success");
-                    frame.codec_mut().set_encryption(EncryptioinOption::Encryption(
-                        auth_provider
-                    ));
+                    frame
+                        .codec_mut()
+                        .set_encryption(EncryptioinOption::Encryption(auth_provider));
                     break Ok(serde_wasm_bindgen::to_value(&bind_response)?);
                 }
                 LdapResultCode::SaslBindInProgress => {

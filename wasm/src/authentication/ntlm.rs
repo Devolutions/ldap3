@@ -1,5 +1,4 @@
 use futures_util::future::LocalBoxFuture;
-use serde::de;
 use sspi::{
     builders::EmptyInitializeSecurityContext, AuthIdentity, ClientRequestFlags, CredentialUse,
     DataRepresentation, EncryptionFlags, Ntlm, SecurityBuffer, SecurityBufferType, SecurityStatus,
@@ -7,8 +6,6 @@ use sspi::{
 };
 
 use super::{SecurityProvider, StepResult};
-use crate::error::JsErrorValue;
-use crate::{to_js_error, JsResult};
 pub(crate) struct NtlmAuthProvier {
     ntlm: Ntlm,
     credentials_handle: <Ntlm as SspiImpl>::CredentialsHandle,
@@ -16,6 +13,8 @@ pub(crate) struct NtlmAuthProvier {
     sign: Option<bool>,
     seal: Option<bool>,
     sequence_number: u32,
+    recv_sequence_number: u32,
+    status: Option<SecurityStatus>,
 }
 
 impl NtlmAuthProvier {
@@ -47,12 +46,21 @@ impl NtlmAuthProvier {
             sign,
             seal,
             sequence_number: 0,
+            recv_sequence_number: 0,
+            status: None,
         }
     }
 
     fn next_sequence_number(&mut self) -> u32 {
+        let res = self.sequence_number;
         self.sequence_number += 1;
-        self.sequence_number
+        res
+    }
+
+    fn next_recv_sequence_number(&mut self) -> u32 {
+        let res = self.recv_sequence_number;
+        self.recv_sequence_number += 1;
+        res
     }
 }
 impl SecurityProvider for NtlmAuthProvier {
@@ -90,6 +98,7 @@ impl SecurityProvider for NtlmAuthProvier {
                 .ntlm
                 .initialize_security_context_impl(&mut builder)
                 .resolve_to_result()?;
+            self.status = Some(result.status);
 
             if [
                 SecurityStatus::CompleteAndContinue,
@@ -128,12 +137,15 @@ impl SecurityProvider for NtlmAuthProvier {
     }
 
     fn decrypt(&mut self, input: Vec<u8>) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-        let mut msg_buffer = vec![SecurityBuffer::new(
-            input.to_vec(),
-            SecurityBufferType::Stream,
-        )];
-        let seq = self.next_sequence_number();
+        let first_16_bytes = input[0..16].to_vec();
+        let rest = input[16..].to_vec();
+
+        let mut msg_buffer = vec![
+            SecurityBuffer::new(first_16_bytes, SecurityBufferType::Token),
+            SecurityBuffer::new(rest, SecurityBufferType::Data),
+        ];
+        let seq = self.next_recv_sequence_number();
         self.ntlm.decrypt_message(&mut msg_buffer, seq)?;
-        Ok(msg_buffer[0].buffer.clone())
+        Ok(msg_buffer[1].buffer.clone())
     }
 }

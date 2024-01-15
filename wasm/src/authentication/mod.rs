@@ -16,9 +16,9 @@ pub trait SecurityProvider {
     // we are using wasm, so we dont need Send on the future, LocalBoxFuture is fine
     fn step<'a>(&'a mut self, input: &'a [u8]) -> LocalBoxFuture<'a, StepResult>;
 
-    fn encrypt(&mut self, input: Vec<u8>) -> Result<Vec<u8>,Box<dyn std::error::Error>>;
+    fn encrypt(&mut self, input: Vec<u8>) -> Result<Vec<u8>, Box<dyn std::error::Error>>;
 
-    fn decrypt(&mut self, input: Vec<u8>) -> Result<Vec<u8>,Box<dyn std::error::Error>>;
+    fn decrypt(&mut self, input: Vec<u8>) -> Result<Vec<u8>, Box<dyn std::error::Error>>;
 }
 
 #[derive(Debug)]

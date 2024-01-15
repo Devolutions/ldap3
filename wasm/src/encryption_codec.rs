@@ -1,23 +1,18 @@
 use std::io;
 
-use futures_util::AsyncReadExt;
 use ldap3_proto::{LdapCodec, LdapMsg};
 use tokio_util::{
-    bytes::{buf, Buf},
+    bytes::Buf,
     codec::{Decoder, Encoder},
 };
 
 use crate::authentication::SecurityProvider;
 
+#[derive(Default)]
 pub enum EncryptioinOption {
     Encryption(Box<dyn SecurityProvider>),
+    #[default]
     NoEncryption,
-}
-
-impl Default for EncryptioinOption {
-    fn default() -> Self {
-        EncryptioinOption::NoEncryption
-    }
 }
 
 #[derive(Default)]
@@ -46,11 +41,8 @@ impl Decoder for EncryptionCodec {
     ) -> Result<Option<Self::Item>, Self::Error> {
         match self.encryption {
             EncryptioinOption::Encryption(ref mut security) => {
-                
-                tracing::info!("decoding encrypted message:src = {:?}", src);
-                src.reserve(4);
                 if src.remaining() < 4 {
-                    tracing::info!("not enough bytes to read length");
+                    tracing::info!("not enough bytes to read message length");
                     return Ok(None);
                 }
                 let mut length = src.take(4);
@@ -62,20 +54,16 @@ impl Decoder for EncryptionCodec {
                 }
                 let sasl_buffer = src.take(size as usize);
                 let sasl_buffer = sasl_buffer.get_ref().to_vec();
-                src.advance(4);
-                src.advance(size as usize);
                 let decrypted = security.decrypt(sasl_buffer).map_err(|e| {
-                    io::Error::new(
-                        io::ErrorKind::Other,
-                        format!("decryption error: {}", e.to_string()),
-                    )
+                    io::Error::new(io::ErrorKind::Other, format!("decryption error: {}", e))
                 })?;
+                src.advance(size as usize);
 
                 return self
                     .codec
                     .decode(&mut tokio_util::bytes::BytesMut::from(decrypted.as_slice()));
             }
-            EncryptioinOption::NoEncryption => return self.codec.decode(src),
+            EncryptioinOption::NoEncryption => self.codec.decode(src),
         }
     }
 }
