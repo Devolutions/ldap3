@@ -1,6 +1,6 @@
 {
   "name": "@devolutions/ldap-wasm-js",
-  "version": "0.2.5",
+  "version": "0.2.7",
   "description": "a ldap pacakges exposes RUST LDAP3 to Javascript in Browser",
   "email": "jou@devolutions.net",
   "main": "./dist/ldap-wasm-js.js",
@@ -12,8 +12,7 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "build:production": "wasm-pack build --target web --release && vite build",
-    "build": "wasm-pack build --target web --dev && vite build --mode development",
-    "publish": "npm run build:production && npm version patch && npm publish"
+    "build": "wasm-pack build --target web --dev && vite build --mode development"
   },
   "repository": {
     "type": "git",

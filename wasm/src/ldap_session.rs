@@ -6,8 +6,9 @@ use crate::{
         SecurityProvider,
     },
     dto::control::LdapControlArray,
-    encryption_codec::{EncryptioinOption, EncryptionCodec},
+    encryption_stream::EncryptionStream,
     error::JsErrorValue,
+    search::LdapSearchStreamBuilder,
 };
 use async_io_stream::IoStream;
 use futures_util::sink::SinkExt;
@@ -20,7 +21,7 @@ use ldap3_proto::{
         LdapAddRequest, LdapBindCred, LdapBindRequest, LdapModify, LdapModifyRequest, LdapOp,
         SaslCredentials,
     },
-    LdapMsg, LdapResultCode, LdapSearchScope,
+    LdapCodec, LdapMsg, LdapResultCode, LdapSearchScope,
 };
 
 use serde::{Deserialize, Serialize};
@@ -32,15 +33,10 @@ use tsify::Tsify;
 use wasm_bindgen::prelude::*;
 use ws_stream_wasm::WsStreamIo;
 
-use crate::{
-    dto::modify::ModifyRequest,
-    return_msg_if_type_matches,
-    search::{LdapSearchResultStream, LdapSearchStreamBuilder},
-    send_message,
-};
+use crate::{dto::modify::ModifyRequest, return_msg_if_type_matches, send_message};
 use crate::{to_js_error, JsResult};
 
-pub(crate) type LdapFrame = Framed<IoStream<WsStreamIo, Vec<u8>>, EncryptionCodec>;
+pub(crate) type LdapFrame = Framed<EncryptionStream<IoStream<WsStreamIo, Vec<u8>>>, LdapCodec>;
 #[wasm_bindgen]
 pub struct LdapSession {
     frame: Arc<Mutex<LdapFrame>>,
@@ -88,8 +84,9 @@ impl LdapSession {
                 .await
                 .map_err(|e| to_js_error!("Failed to connect to server : {:?}", e))?;
         let io_stream = ws_stream_wasm.into_io();
+        let io_stream = EncryptionStream::new(io_stream);
 
-        let framed = Framed::new(io_stream, EncryptionCodec::default());
+        let framed = Framed::new(io_stream, LdapCodec::default());
         let session = LdapSession {
             frame: Arc::new(Mutex::new(framed)),
             message_id: 0,
@@ -107,7 +104,7 @@ impl LdapSession {
         size_limit: Option<i32>,
         time_limit: Option<i32>,
         controls: Option<LdapControlArray>,
-    ) -> JsResult<LdapSearchResultStream> {
+    ) -> JsResult<crate::search::LdapSearchResultStream> {
         let filter =
             parse_ldap_filter_str(&filter).map_err(|e| to_js_error!("Invalid filter : {:?}", e))?;
         trace!(?filter, ?attributes, ?controls);
@@ -383,9 +380,7 @@ impl LdapSession {
             match bind_response.res.code {
                 LdapResultCode::Success => {
                     tracing::trace!("bind success");
-                    frame
-                        .codec_mut()
-                        .set_encryption(EncryptioinOption::Encryption(auth_provider));
+                    frame.get_mut().set_encryption(auth_provider);
                     break Ok(serde_wasm_bindgen::to_value(&bind_response)?);
                 }
                 LdapResultCode::SaslBindInProgress => {

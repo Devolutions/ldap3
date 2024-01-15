@@ -137,8 +137,12 @@ impl SecurityProvider for NtlmAuthProvier {
     }
 
     fn decrypt(&mut self, input: Vec<u8>) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-        let first_16_bytes = input[0..16].to_vec();
-        let rest = input[16..].to_vec();
+        let length = u32::from_be_bytes([input[0], input[1], input[2], input[3]]);
+        if length != input.len() as u32 - 4 {
+            return Err("Invalid length".into());
+        }
+        let first_16_bytes = input[4..20].to_vec();
+        let rest = input[20..].to_vec();
 
         let mut msg_buffer = vec![
             SecurityBuffer::new(first_16_bytes, SecurityBufferType::Token),
