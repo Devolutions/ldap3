@@ -22,32 +22,27 @@ pub trait SecurityProvider {
     fn status(&self) -> Option<sspi::SecurityStatus>;
 }
 
+#[derive(Debug,Default)]
+pub struct PlaceHolderSecurityProvider;
+
+impl SecurityProvider for PlaceHolderSecurityProvider {
+    fn step<'a>(&'a mut self, input: &'a [u8]) -> LocalBoxFuture<'a, StepResult> {
+        todo!()
+    }
+
+    fn encrypt(&mut self, input: Vec<u8>) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+        Ok(input)
+    }
+
+    fn decrypt(&mut self, input: Vec<u8>) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+        Ok(input)
+    }
+
+    fn status(&self) -> Option<sspi::SecurityStatus> {
+        todo!()
+    }
+}
+
 pub trait NetworkClient {
     fn send<'a>(&self, network_request: &NetworkRequest) -> BoxFuture<'a, Vec<u8>>;
 }
-
-// #[derive(Debug)]
-// pub(crate) struct WasmNetworkClient;
-
-// impl WasmNetworkClient {
-//     async fn send(&self, network_request: &NetworkRequest) -> Vec<u8> {
-//         debug!(?network_request.protocol, ?network_request.url);
-//         match &network_request.protocol {
-//             NetworkProtocol::Http | NetworkProtocol::Https => {
-//                 let body = js_sys::Uint8Array::from(&network_request.data[..]);
-
-//                 gloo_net::http::Request::post(network_request.url.as_str())
-//                     .header("keep-alive", "true")
-//                     .body(body)
-//                     .unwrap()
-//                     .send()
-//                     .await
-//                     .unwrap()
-//                     .binary()
-//                     .await
-//                     .unwrap()
-//             }
-//             _ => panic!("unsupported protocol for KDC proxy"),
-//         }
-//     }
-// }

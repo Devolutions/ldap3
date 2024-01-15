@@ -1,11 +1,10 @@
 use std::io::{Read, Write};
 
 use async_client::{
-    encryption_codec::EncryptionCodec,
-    ldap_session::{LdapSession, SaslBindConfig, SearchParameters},
+    ldap_client::{LdapAsyncClient, SaslBindConfig, SearchParameters},
 };
 use futures_util::StreamExt;
-use ldap3_proto::{parse_ldap_filter_str, proto::LdapSearchRequest, LdapCodec, LdapMsg};
+use ldap3_proto::{parse_ldap_filter_str, proto::LdapSearchRequest, LdapCodec, LdapMsg, control};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
@@ -32,16 +31,17 @@ pub async fn main() -> anyhow::Result<()> {
     let filter = "(&(objectClass=user)(objectCategory=person))".to_string();
     let scope = ldap3_proto::LdapSearchScope::Subtree;
     let attributes = vec!["cn".to_string(), "operatingSystem".to_string()];
-
+    let simple_bind_dn = "cn=Administrator,cn=Users,dc=ad,dc=it-help,dc=ninja".to_string();
     let sign = Some(true);
     let seal = Some(true);
 
     let stream = TcpStream::connect("10.10.0.3:389").await?;
-    let mut session = LdapSession::connect(stream).await?;
+    let mut session = LdapAsyncClient::connect(stream).await?;
 
+    // session.bind(simple_bind_dn, password, None).await?;
     session
         .sasl_bind(SaslBindConfig {
-            auth_method: async_client::ldap_session::SspiAuthMethod::Ntlm {
+            auth_method: async_client::ldap_client::SspiAuthMethod::Ntlm {
                 server_computer_name,
             },
             username,

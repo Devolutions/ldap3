@@ -1,7 +1,9 @@
 pub mod authentication;
-pub mod encryption_codec;
-pub mod ldap_session;
+pub mod ldap_client;
 pub mod search;
+pub mod encryption_stream;
+
+
 
 pub fn dbg_u8_itr<'a>(u8_itr: impl Iterator<Item = &'a u8>) {
     let hex = u8_itr

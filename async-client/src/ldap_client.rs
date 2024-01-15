@@ -9,7 +9,7 @@ use ldap3_proto::{
         LdapAddRequest, LdapAttribute, LdapBindCred, LdapBindRequest, LdapBindResponse, LdapModify,
         LdapModifyRequest, LdapOp, SaslCredentials,
     },
-    LdapMsg, LdapResultCode, LdapSearchScope,
+    LdapCodec, LdapMsg, LdapResultCode, LdapSearchScope,
 };
 use serde::{Deserialize, Serialize};
 use tokio::{
@@ -20,7 +20,7 @@ use tokio_util::codec::Framed;
 
 use crate::{
     authentication::{ntlm::NtlmAuthProvier, SecurityProvider},
-    encryption_codec::{EncryptioinOption, EncryptionCodec},
+    encryption_stream::EncryptionStream,
     search::LdapSearchResultStream,
 };
 
@@ -33,8 +33,8 @@ macro_rules! return_if_match {
     };
 }
 
-pub(crate) type LdapFrame<T> = Framed<T, EncryptionCodec>;
-pub struct LdapSession<T>
+pub(crate) type LdapFrame<T> = Framed<EncryptionStream<T>, LdapCodec>;
+pub struct LdapAsyncClient<T>
 where
     T: AsyncRead + AsyncWrite + Unpin,
 {
@@ -42,7 +42,7 @@ where
     message_id: i32,
 }
 
-impl<T> LdapSession<T>
+impl<T> LdapAsyncClient<T>
 where
     T: AsyncRead + AsyncWrite + Unpin,
 {
@@ -67,13 +67,17 @@ pub struct SearchParameters {
     pub controls: Option<Vec<LdapControl>>,
 }
 
-impl<T> LdapSession<T>
+impl<T> LdapAsyncClient<T>
 where
     T: AsyncRead + AsyncWrite + Unpin,
 {
-    pub async fn connect(stream: T) -> anyhow::Result<LdapSession<T>> {
-        let framed = Framed::new(stream, EncryptionCodec::default());
-        let session = LdapSession {
+    pub async fn connect(stream: T) -> anyhow::Result<LdapAsyncClient<T>> {
+        let encryption_stream = EncryptionStream::new(
+            stream,
+            Box::new(crate::authentication::PlaceHolderSecurityProvider::default()),
+        );
+        let framed = Framed::new(encryption_stream, LdapCodec::default());
+        let session = LdapAsyncClient {
             frame: Arc::new(Mutex::new(framed)),
             message_id: 0,
         };
@@ -98,9 +102,9 @@ where
         tracing::trace!(?filter, ?attributes, ?controls);
         let next_msg_id = self.next_message_id();
 
-        self.frame
-            .lock()
-            .await
+        let mut framed = self.frame.lock().await;
+        tracing::info!("Sending search request");
+        framed
             .send(LdapMsg {
                 msgid: next_msg_id,
                 op: LdapOp::SearchRequest(ldap3_proto::proto::LdapSearchRequest {
@@ -117,6 +121,7 @@ where
             })
             .await
             .with_context(|| "Unable to send search request")?;
+        tracing::info!("Search request sent");
 
         let stream = LdapSearchResultStream::new(self.frame.clone());
         Ok(stream)
@@ -246,7 +251,7 @@ pub struct SaslBindConfig {
     pub seal: Option<bool>,
 }
 
-impl<T> LdapSession<T>
+impl<T> LdapAsyncClient<T>
 where
     T: AsyncRead + AsyncWrite + Unpin,
 {
@@ -354,10 +359,7 @@ where
                     tracing::trace!("bind success");
                     let status = auth_provider.status();
                     tracing::debug!("bind is successfully finished, status : {:?}", status);
-                    frame
-                        .codec_mut()
-                        .set_encryption(EncryptioinOption::Encryption(auth_provider));
-
+                    frame.get_mut().set_encryption(auth_provider);
                     break Ok(bind_response);
                 }
                 LdapResultCode::SaslBindInProgress => {

@@ -4,6 +4,7 @@ use sspi::{
     DataRepresentation, EncryptionFlags, Ntlm, SecurityBuffer, SecurityBufferType, SecurityStatus,
     Sspi, SspiImpl, Username,
 };
+use tracing::info;
 
 use crate::dbg_u8_itr;
 
@@ -139,8 +140,19 @@ impl SecurityProvider for NtlmAuthProvier {
     }
 
     fn decrypt(&mut self, input: Vec<u8>) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-        let first_16_bytes = input[0..16].to_vec();
-        let rest = input[16..].to_vec();
+        info!("decrypting message");
+        dbg_u8_itr(input.iter());
+
+        let size = input[0..4].to_vec();
+        // if size != input.len() -4, return error
+        if u32::from_be_bytes(size.try_into().unwrap()) != input.len() as u32 - 4 {
+            return Err(Box::new(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "invalid message size",
+            )));
+        }
+        let first_16_bytes = input[4..20].to_vec();
+        let rest = input[20..].to_vec();
 
         let mut msg_buffer = vec![
             SecurityBuffer::new(first_16_bytes, SecurityBufferType::Token),

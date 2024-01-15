@@ -6,7 +6,7 @@ use ldap3_proto::LdapMsg;
 
 use tokio::sync::Mutex;
 
-use crate::ldap_session::LdapFrame;
+use crate::ldap_client::LdapFrame;
 
 pub struct LdapSearchResultStream<T> {
     frame: Arc<Mutex<LdapFrame<T>>>,
@@ -31,6 +31,7 @@ where
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Option<Self::Item>> {
         let lock_future = self.frame.lock();
+        tracing::debug!("polling next item from search stream");
 
         let mut frame = match lock_future.boxed_local().poll_unpin(cx) {
             std::task::Poll::Ready(a) => a,

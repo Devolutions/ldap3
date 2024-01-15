@@ -1,4 +1,4 @@
-use async_client::ldap_session::{LdapSession, SaslBindConfig};
+use async_client::ldap_client::{LdapAsyncClient, SaslBindConfig};
 use tokio::net::TcpStream;
 
 #[tokio::main]
@@ -10,11 +10,11 @@ pub async fn main() -> anyhow::Result<()> {
     let seal = Some(true);
 
     let stream = TcpStream::connect("10.10.0.3:389").await.unwrap();
-    let mut session = LdapSession::connect(stream).await?;
+    let mut session = LdapAsyncClient::connect(stream).await?;
 
     session
         .sasl_bind(SaslBindConfig {
-            auth_method: async_client::ldap_session::SspiAuthMethod::Ntlm {
+            auth_method: async_client::ldap_client::SspiAuthMethod::Ntlm {
                 server_computer_name,
             },
             username,
@@ -24,6 +24,7 @@ pub async fn main() -> anyhow::Result<()> {
             controls: None,
         })
         .await?;
+    tracing::info!("bind success");
 
     Ok(())
 }
