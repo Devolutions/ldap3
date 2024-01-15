@@ -1,0 +1,410 @@
+use std::sync::Arc;
+
+use anyhow::Context;
+use futures_util::{SinkExt, StreamExt};
+use ldap3_proto::{
+    control::LdapControl,
+    parse_ldap_filter_str,
+    proto::{
+        LdapAddRequest, LdapAttribute, LdapBindCred, LdapBindRequest, LdapBindResponse, LdapModify,
+        LdapModifyRequest, LdapOp, SaslCredentials,
+    },
+    LdapMsg, LdapResultCode, LdapSearchScope,
+};
+use serde::{Deserialize, Serialize};
+use tokio::{
+    io::{AsyncRead, AsyncWrite},
+    sync::Mutex,
+};
+use tokio_util::codec::Framed;
+
+use crate::{
+    authentication::{ntlm::NtlmAuthProvier, SecurityProvider},
+    encryption_codec::{EncryptioinOption, EncryptionCodec},
+    search::LdapSearchResultStream,
+};
+
+macro_rules! return_if_match {
+    ($res:expr, $variant:path) => {
+        match $res.op {
+            $variant(_) => Ok($res),
+            _ => Err(anyhow::anyhow!("Invalid response")),
+        }
+    };
+}
+
+pub(crate) type LdapFrame<T> = Framed<T, EncryptionCodec>;
+pub struct LdapSession<T>
+where
+    T: AsyncRead + AsyncWrite + Unpin,
+{
+    frame: Arc<Mutex<LdapFrame<T>>>,
+    message_id: i32,
+}
+
+impl<T> LdapSession<T>
+where
+    T: AsyncRead + AsyncWrite + Unpin,
+{
+    fn next_message_id(&mut self) -> i32 {
+        self.message_id += 1;
+        self.message_id
+    }
+
+    pub fn frame(&self) -> Arc<Mutex<LdapFrame<T>>> {
+        self.frame.clone()
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SearchParameters {
+    pub search_base: String,
+    pub filter: String,
+    pub scope: LdapSearchScope,
+    pub attributes: Vec<String>,
+    pub size_limit: Option<i32>,
+    pub time_limit: Option<i32>,
+    pub controls: Option<Vec<LdapControl>>,
+}
+
+impl<T> LdapSession<T>
+where
+    T: AsyncRead + AsyncWrite + Unpin,
+{
+    pub async fn connect(stream: T) -> anyhow::Result<LdapSession<T>> {
+        let framed = Framed::new(stream, EncryptionCodec::default());
+        let session = LdapSession {
+            frame: Arc::new(Mutex::new(framed)),
+            message_id: 0,
+        };
+        Ok(session)
+    }
+
+    pub async fn search(
+        &mut self,
+        search_parameters: SearchParameters,
+    ) -> anyhow::Result<LdapSearchResultStream<T>> {
+        let SearchParameters {
+            search_base,
+            filter,
+            scope,
+            attributes,
+            size_limit,
+            time_limit,
+            controls,
+        } = search_parameters;
+        let filter = parse_ldap_filter_str(&filter)
+            .with_context(|| format!("Unable to parse filter : {}", filter))?;
+        tracing::trace!(?filter, ?attributes, ?controls);
+        let next_msg_id = self.next_message_id();
+
+        self.frame
+            .lock()
+            .await
+            .send(LdapMsg {
+                msgid: next_msg_id,
+                op: LdapOp::SearchRequest(ldap3_proto::proto::LdapSearchRequest {
+                    scope,
+                    sizelimit: size_limit.unwrap_or(10),
+                    timelimit: time_limit.unwrap_or(10),
+                    typesonly: false,
+                    filter,
+                    base: search_base,
+                    aliases: ldap3_proto::proto::LdapDerefAliases::Always,
+                    attrs: attributes,
+                }),
+                ctrl: controls.unwrap_or_default().into(),
+            })
+            .await
+            .with_context(|| "Unable to send search request")?;
+
+        let stream = LdapSearchResultStream::new(self.frame.clone());
+        Ok(stream)
+    }
+
+    pub async fn add(
+        &mut self,
+        dn: String,
+        attributes: Vec<LdapAttribute>,
+        controls: Option<Vec<LdapControl>>,
+    ) -> anyhow::Result<LdapMsg> {
+        let request = LdapAddRequest {
+            dn,
+            attributes: attributes,
+        };
+
+        let msg = LdapMsg {
+            msgid: self.next_message_id(),
+            op: LdapOp::AddRequest(request),
+            ctrl: controls.unwrap_or_default().into(),
+        };
+
+        let res = self.send_msg(msg).await?;
+        return_if_match!(res, LdapOp::AddResponse)
+    }
+
+    pub async fn delete(
+        &mut self,
+        dn: String,
+        controls: Option<Vec<LdapControl>>,
+    ) -> anyhow::Result<LdapMsg> {
+        let msg = LdapMsg {
+            msgid: self.next_message_id(),
+            op: LdapOp::DelRequest(dn),
+            ctrl: controls.unwrap_or_default().into(),
+        };
+
+        let res = self.send_msg(msg).await?;
+        return_if_match!(res, LdapOp::DelResponse)
+    }
+
+    pub async fn modify_dn(
+        &mut self,
+        dn: String,
+        newrdn: String,
+        delete_old_rdn: bool,
+        new_superior: Option<String>,
+        controls: Option<Vec<LdapControl>>,
+    ) -> anyhow::Result<LdapMsg> {
+        let msg = LdapMsg {
+            msgid: self.next_message_id(),
+            op: LdapOp::ModifyDNRequest(ldap3_proto::proto::LdapModifyDNRequest {
+                dn,
+                newrdn,
+                deleteoldrdn: delete_old_rdn,
+                new_superior,
+            }),
+            ctrl: controls.unwrap_or_default().into(),
+        };
+
+        let result = self.send_msg(msg).await?;
+        return_if_match!(result, LdapOp::ModifyDNResponse)
+    }
+
+    pub async fn modify(
+        &mut self,
+        dn: String,
+        changes: Vec<LdapModify>,
+        controls: Option<Vec<LdapControl>>,
+    ) -> anyhow::Result<LdapMsg> {
+        let op = LdapOp::ModifyRequest(LdapModifyRequest { changes, dn });
+
+        let msg = LdapMsg {
+            msgid: self.next_message_id(),
+            op,
+            ctrl: controls.unwrap_or_default().into(),
+        };
+
+        let res = self.send_msg(msg).await?;
+        return_if_match!(res, LdapOp::ModifyResponse)
+    }
+
+    pub async fn compare(
+        &mut self,
+        dn: String,
+        attribute: String,
+        value: String,
+        controls: Option<Vec<LdapControl>>,
+    ) -> anyhow::Result<LdapMsg> {
+        let msg = LdapMsg {
+            msgid: self.next_message_id(),
+            op: LdapOp::CompareRequest(ldap3_proto::proto::LdapCompareRequest {
+                dn,
+                atype: attribute,
+                val: value.as_bytes().to_vec(),
+            }),
+            ctrl: controls.unwrap_or_default().into(),
+        };
+
+        let res = self.send_msg(msg).await?;
+        return_if_match!(res, LdapOp::CompareResult)
+    }
+
+    async fn send_msg(&mut self, msg: LdapMsg) -> anyhow::Result<LdapMsg> {
+        let mut frame = self.frame.lock().await;
+        frame
+            .send(msg)
+            .await
+            .with_context(|| "Unable to send message")?;
+
+        let res = frame
+            .next()
+            .await
+            .with_context(|| "Unable to receive response")??;
+
+        Ok(res)
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SaslBindConfig {
+    pub username: String,
+    pub password: String,
+    pub auth_method: SspiAuthMethod,
+    pub controls: Option<Vec<LdapControl>>,
+    pub sign: Option<bool>,
+    pub seal: Option<bool>,
+}
+
+impl<T> LdapSession<T>
+where
+    T: AsyncRead + AsyncWrite + Unpin,
+{
+    pub async fn bind(
+        &mut self,
+        distinguished_name: String,
+        password: String,
+        controls: Option<Vec<LdapControl>>,
+    ) -> anyhow::Result<LdapMsg> {
+        let msg = LdapMsg {
+            msgid: self.next_message_id(),
+            op: LdapOp::BindRequest(LdapBindRequest {
+                dn: distinguished_name,
+                cred: LdapBindCred::Simple(password),
+            }),
+            ctrl: controls.unwrap_or_default().into(),
+        };
+
+        let res = self.send_msg(msg).await?;
+
+        match &res.op {
+            LdapOp::BindResponse(bind_response) => match &bind_response.res.code {
+                ldap3_proto::proto::LdapResultCode::Success => Ok(res),
+                _ => Err(anyhow::anyhow!("Bind failed : {:?}", bind_response)),
+            },
+            _ => Err(anyhow::anyhow!("Invalid response")),
+        }
+    }
+
+    pub async fn unbind(&mut self, control: Option<Vec<LdapControl>>) -> anyhow::Result<()> {
+        let msg = LdapMsg {
+            msgid: self.next_message_id(),
+            op: LdapOp::UnbindRequest,
+            ctrl: control.unwrap_or_default().into(),
+        };
+
+        self.frame
+            .lock()
+            .await
+            .send(msg)
+            .await
+            .map_err(|e| anyhow::anyhow!("Unable to send unbind request -> {:?}", e))?;
+        Ok(())
+    }
+
+    pub async fn sasl_bind(&mut self, config: SaslBindConfig) -> anyhow::Result<LdapBindResponse> {
+        let SaslBindConfig {
+            username,
+            password,
+            auth_method,
+            controls,
+            sign,
+            seal,
+        } = config;
+
+        let mut auth_provider: Box<dyn SecurityProvider> = match auth_method {
+            SspiAuthMethod::Ntlm {
+                server_computer_name,
+            } => Box::new(NtlmAuthProvier::new(
+                &username,
+                &password,
+                &server_computer_name,
+                sign,
+                seal,
+            )),
+            _ => todo!(),
+        };
+
+        let token = auth_provider.step(&[]).await.unwrap();
+
+        let msg = LdapMsg {
+            msgid: 1,
+            op: LdapOp::BindRequest(LdapBindRequest {
+                dn: "".to_string(),
+                cred: LdapBindCred::SASL(SaslCredentials {
+                    mechanism: "GSS-SPNEGO".to_string(),
+                    credentials: token,
+                }),
+            }),
+            ctrl: controls.unwrap_or_default().into(),
+        };
+
+        let frame_arc = self.frame.clone();
+        let mut frame = frame_arc.lock().await;
+
+        frame
+            .send(msg)
+            .await
+            .with_context(|| "Unable to send bind request")?;
+
+        loop {
+            let msg = frame
+                .next()
+                .await
+                .with_context(|| "Unable to receive bind response")??;
+
+            let bind_response = if let LdapOp::BindResponse(bind_response) = msg.op {
+                bind_response
+            } else {
+                anyhow::bail!("Invalid response");
+            };
+
+            match bind_response.res.code {
+                LdapResultCode::Success => {
+                    tracing::trace!("bind success");
+                    let status = auth_provider.status();
+                    tracing::debug!("bind is successfully finished, status : {:?}", status);
+                    frame
+                        .codec_mut()
+                        .set_encryption(EncryptioinOption::Encryption(auth_provider));
+
+                    break Ok(bind_response);
+                }
+                LdapResultCode::SaslBindInProgress => {
+                    if let Some(ref cred) = bind_response.saslcreds {
+                        let token = auth_provider.step(cred).await.map_err(|e| {
+                            anyhow::anyhow!("Unable to step auth provider : {:?}", e)
+                        })?;
+                        let msg = LdapMsg {
+                            msgid: self.next_message_id(),
+                            op: LdapOp::BindRequest(LdapBindRequest {
+                                dn: String::default(),
+                                cred: LdapBindCred::SASL(SaslCredentials {
+                                    mechanism: "GSS-SPNEGO".to_string(),
+                                    credentials: token,
+                                }),
+                            }),
+                            ctrl: vec![],
+                        };
+
+                        frame
+                            .send(msg)
+                            .await
+                            .with_context(|| "Unable to send bind request")?;
+                    }
+                }
+                _ => {
+                    anyhow::bail!("Bind failed : {:?}", bind_response);
+                }
+            }
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SspiAuthMethod {
+    Ntlm {
+        server_computer_name: String,
+    },
+    Kerberos {
+        domain: String,
+        kdc_proxy_url: String,
+        server_computer_name: String,
+    },
+    Negotiate {
+        domain: Option<String>,
+        kdc_proxy_url: Option<String>,
+        server_computer_name: String,
+    },
+}

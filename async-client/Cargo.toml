@@ -1,0 +1,41 @@
+[package]
+name = "async-client"
+version.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+edition.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+keywords.workspace = true
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
+ldap3_proto = { workspace = true, features = ["serde"] }
+serde-wasm-bindgen = "0.6.1"
+ws_stream_wasm = "0.7.4"
+async_io_stream = { version = "0.3.3", features = ["tokio", "tokio_io"] }
+framed = "0.4.3"
+tokio-util = { version = "0.7.10", features = ["codec"] }
+tokio = { workspace = true, features = ["io-util"] }
+futures-util = "0.3.29"
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+tracing-wasm = "0.2.1"
+anyhow = "1.0.75"
+uuid = { version = "1.5.0", features = ["serde"] }
+enum-assoc = "1.1.0"
+sspi.workspace = true
+regex = "1.10.2"
+reqwest-wasm = "0.11.16"
+gloo-net = "0.5.0"
+time = { version = "0.3", features = ["wasm-bindgen"] }
+tokio-stream = "0.1.14"
+thiserror.workspace = true
+
+[dev-dependencies]
+tokio = {workspace = true, version = "1.12.0", features = ["rt-multi-thread", "macros","rt","net"] }
+uuid = "1.5.0"
