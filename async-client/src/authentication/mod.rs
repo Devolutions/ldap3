@@ -27,7 +27,7 @@ pub struct PlaceHolderSecurityProvider;
 
 impl SecurityProvider for PlaceHolderSecurityProvider {
     fn step<'a>(&'a mut self, input: &'a [u8]) -> LocalBoxFuture<'a, StepResult> {
-        todo!()
+        unreachable!()
     }
 
     fn encrypt(&mut self, input: Vec<u8>) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
@@ -39,10 +39,24 @@ impl SecurityProvider for PlaceHolderSecurityProvider {
     }
 
     fn status(&self) -> Option<sspi::SecurityStatus> {
-        todo!()
+        unreachable!()
     }
 }
 
 pub trait NetworkClient {
     fn send<'a>(&self, network_request: &NetworkRequest) -> BoxFuture<'a, Vec<u8>>;
 }
+
+// pub struct DefaultNetworkClient;
+
+// impl NetworkClient for DefaultNetworkClient {
+//     fn send<'a>(&self, network_request: &NetworkRequest) -> BoxFuture<'a, Vec<u8>> {
+//         Box::pin(async move {
+//             let mut stream = tokio::net::TcpStream::connect(network_request.address()).await?;
+//             stream.write_all(network_request.data()).await?;
+//             let mut buf = vec![0; 1024];
+//             let n = stream.read(&mut buf).await?;
+//             Ok(buf[..n].to_vec())
+//         })
+//     }
+// }

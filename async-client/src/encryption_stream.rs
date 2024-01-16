@@ -5,7 +5,7 @@ use std::{
 
 use tokio::io::ReadBuf;
 
-use crate::{authentication::SecurityProvider, dbg_u8_itr};
+use crate::authentication::SecurityProvider;
 
 pub struct EncryptionStream<T> {
     inner: T,
@@ -55,7 +55,6 @@ where
 
         buf.put_slice(&decrypted_payload[..]);
         tracing::debug!("decrypted poll read payload");
-        dbg_u8_itr(buf.filled().iter());
         Poll::Ready(Ok(()))
     }
 }
@@ -79,8 +78,7 @@ where
             }
         };
 
-        tracing::debug!("encrypted poll write payload,size = {:?},original size = {:?}", encrypted_payload.len(), buf.len());
-        dbg_u8_itr(encrypted_payload.iter());
+        tracing::trace!("encrypted poll write payload,size = {:?},original size = {:?}", encrypted_payload.len(), buf.len());
 
         match Pin::new(&mut self.inner).poll_write(cx, &encrypted_payload[..]) {
             Poll::Ready(res) => {
@@ -98,7 +96,6 @@ where
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<std::io::Result<()>> {
-        tracing::debug!("poll flush");
         Pin::new(&mut self.inner).poll_flush(cx)
     }
 
@@ -106,7 +103,6 @@ where
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<std::io::Result<()>> {
-        tracing::debug!("poll shutdown");
         Pin::new(&mut self.inner).poll_shutdown(cx)
     }
 }

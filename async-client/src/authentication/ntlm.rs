@@ -4,9 +4,6 @@ use sspi::{
     DataRepresentation, EncryptionFlags, Ntlm, SecurityBuffer, SecurityBufferType, SecurityStatus,
     Sspi, SspiImpl, Username,
 };
-use tracing::info;
-
-use crate::dbg_u8_itr;
 
 use super::{SecurityProvider, StepResult};
 pub(crate) struct NtlmAuthProvier {
@@ -131,6 +128,7 @@ impl SecurityProvider for NtlmAuthProvier {
         let length = msg_buffer[0].buffer.len() as u32
             + msg_buffer[1].buffer.len() as u32
             + msg_buffer[2].buffer.len() as u32;
+
         let length_bytes = length.to_be_bytes();
         output.extend_from_slice(&length_bytes);
         output.extend_from_slice(&msg_buffer[0].buffer);
@@ -140,11 +138,7 @@ impl SecurityProvider for NtlmAuthProvier {
     }
 
     fn decrypt(&mut self, input: Vec<u8>) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-        info!("decrypting message");
-        dbg_u8_itr(input.iter());
-
         let size = input[0..4].to_vec();
-        // if size != input.len() -4, return error
         if u32::from_be_bytes(size.try_into().unwrap()) != input.len() as u32 - 4 {
             return Err(Box::new(std::io::Error::new(
                 std::io::ErrorKind::Other,
@@ -160,7 +154,6 @@ impl SecurityProvider for NtlmAuthProvier {
         ];
         let seq = self.next_recv_sequence_number();
         self.ntlm.decrypt_message(&mut msg_buffer, seq)?;
-        dbg_u8_itr(msg_buffer[1].buffer.iter());
         Ok(msg_buffer[1].buffer.clone())
     }
 

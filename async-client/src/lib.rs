@@ -5,13 +5,18 @@ pub mod encryption_stream;
 
 
 
-pub fn dbg_u8_itr<'a>(u8_itr: impl Iterator<Item = &'a u8>) {
-    let hex = u8_itr
-        .map(|x| format!("{:02X}", x))
-        .collect::<Vec<_>>()
-        .join(" ");
-    tracing::info!("Debugging bytes values: {:?}", hex);
+
+#[macro_export]
+macro_rules! debug_u8_hex {
+    ($byte_array:expr, $message:expr) => {
+        let hex = $byte_array.iter()
+            .map(|x| format!("{:02X}", x))
+            .collect::<Vec<_>>()
+            .join(" ");
+        tracing::debug!("{}: {}", $message, hex);
+    };
 }
+
 
 #[derive(Debug, thiserror::Error)]
 pub enum LdapClientError {
