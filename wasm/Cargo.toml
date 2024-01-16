@@ -43,5 +43,6 @@ getrandom = { version = "0.2.11", features = ["js"] }
 reqwest-wasm = "0.11.16"
 gloo-net = "0.5.0"
 time = { version = "0.3", features = ["wasm-bindgen"] }
+thiserror.workspace = true
 [dev-dependencies]
 uuid = "1.5.0"

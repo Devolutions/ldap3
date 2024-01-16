@@ -6,7 +6,7 @@ use sspi::{
 };
 use tracing::debug;
 
-use super::{SecurityProvider, StepResult, WasmNetworkClient};
+use super::{SecurityProvider, StepResult, WasmNetworkClient, SecurityProviderError};
 pub struct KerberoAuthProvier {
     kerbero: Kerberos,
     credentials_handle: <Kerberos as SspiImpl>::CredentialsHandle,
@@ -121,7 +121,7 @@ impl SecurityProvider for KerberoAuthProvier {
         })
     }
 
-    fn encrypt(&mut self, input: Vec<u8>) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    fn encrypt(&mut self, input: Vec<u8>) -> Result<Vec<u8>, SecurityProviderError> {
         let mut msg_buffer = vec![SecurityBuffer::new(input, SecurityBufferType::Stream)];
 
         let seq = self.next_sequence_number();
@@ -130,7 +130,7 @@ impl SecurityProvider for KerberoAuthProvier {
         Ok(msg_buffer[0].buffer.clone())
     }
 
-    fn decrypt(&mut self, input: Vec<u8>) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    fn decrypt(&mut self, input: Vec<u8>) -> Result<Vec<u8>, SecurityProviderError> {
         let mut msg_buffer = vec![SecurityBuffer::new(input, SecurityBufferType::Stream)];
         let seq = self.next_sequence_number();
         self.kerbero.decrypt_message(&mut msg_buffer, seq)?;

@@ -16,9 +16,9 @@ pub trait SecurityProvider {
     // we are using wasm, so we dont need Send on the future, LocalBoxFuture is fine
     fn step<'a>(&'a mut self, input: &'a [u8]) -> LocalBoxFuture<'a, StepResult>;
 
-    fn encrypt(&mut self, input: Vec<u8>) -> Result<Vec<u8>, Box<dyn std::error::Error>>;
+    fn encrypt(&mut self, input: Vec<u8>) -> Result<Vec<u8>, SecurityProviderError>;
 
-    fn decrypt(&mut self, input: Vec<u8>) -> Result<Vec<u8>, Box<dyn std::error::Error>>;
+    fn decrypt(&mut self, input: Vec<u8>) -> Result<Vec<u8>, SecurityProviderError>;
 }
 
 #[derive(Debug)]
@@ -44,5 +44,27 @@ impl WasmNetworkClient {
             }
             _ => panic!("unsupported protocol for KDC proxy"),
         }
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum SecurityProviderError {
+    #[error("SSPI Error")]
+    SspiError(sspi::Error),
+    #[error("IO Error")]
+    IoError(std::io::Error),
+    #[error("Buffer not large enough,expected {0}")]
+    BufferNotLargeEnough(u32),
+}
+
+impl From<sspi::Error> for SecurityProviderError {
+    fn from(value: sspi::Error) -> Self {
+        SecurityProviderError::SspiError(value)
+    }
+}
+
+impl From<std::io::Error> for SecurityProviderError {
+    fn from(value: std::io::Error) -> Self {
+        SecurityProviderError::IoError(value)
     }
 }

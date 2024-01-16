@@ -385,6 +385,7 @@ impl LdapSession {
                 }
                 LdapResultCode::SaslBindInProgress => {
                     if let Some(ref cred) = bind_response.saslcreds {
+                        tracing::info!("sasl bind in progress");
                         let token = auth_provider.step(cred).await.map_err(|e| {
                             to_js_error!("error in accepting incoming sasl token :{:?}", e)
                         })?;
