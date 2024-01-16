@@ -1,18 +1,14 @@
-use std::io::{Read, Write};
+
 
 use async_client::{
     ldap_client::{LdapAsyncClient, SaslBindConfig, SearchParameters},
 };
 use futures_util::StreamExt;
-use ldap3_proto::{parse_ldap_filter_str, proto::LdapSearchRequest, LdapCodec, LdapMsg, control};
+
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
 };
-use tokio_util::{
-    bytes::{BufMut, BytesMut},
-    codec::{Decoder, Encoder},
-};
+
 
 #[tokio::main]
 pub async fn main() -> anyhow::Result<()> {
@@ -20,7 +16,7 @@ pub async fn main() -> anyhow::Result<()> {
         .pretty()
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive(tracing::Level::TRACE.into()),
+                .add_directive(tracing::Level::INFO.into()),
         )
         .init();
 
@@ -28,17 +24,15 @@ pub async fn main() -> anyhow::Result<()> {
     let username = "Administrator@ad.it-help.ninja".to_string();
     let password = "DevoLabs123!".to_string();
     let search_base = "dc=ad,dc=it-help,dc=ninja".to_string();
-    let filter = "(&(objectClass=user)(objectCategory=person))".to_string();
+    let filter = "(objectClass=*)".to_string();
     let scope = ldap3_proto::LdapSearchScope::Subtree;
-    let attributes = vec!["cn".to_string(), "operatingSystem".to_string()];
-    let simple_bind_dn = "cn=Administrator,cn=Users,dc=ad,dc=it-help,dc=ninja".to_string();
+    let attributes = vec!["*".to_string()];
     let sign = Some(true);
     let seal = Some(true);
 
     let stream = TcpStream::connect("10.10.0.3:389").await?;
     let mut session = LdapAsyncClient::connect(stream).await?;
 
-    // session.bind(simple_bind_dn, password, None).await?;
     session
         .sasl_bind(SaslBindConfig {
             auth_method: async_client::ldap_client::SspiAuthMethod::Ntlm {
@@ -59,7 +53,7 @@ pub async fn main() -> anyhow::Result<()> {
             scope,
             attributes,
             controls: None,
-            size_limit: None,
+            size_limit: Some(10000), // stress test
             time_limit: None,
         })
         .await?;

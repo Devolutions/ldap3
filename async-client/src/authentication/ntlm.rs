@@ -5,7 +5,7 @@ use sspi::{
     Sspi, SspiImpl, Username,
 };
 
-use super::{SecurityProvider, StepResult};
+use super::{SecurityProvider, SecurityProviderError, StepResult};
 pub(crate) struct NtlmAuthProvier {
     ntlm: Ntlm,
     credentials_handle: <Ntlm as SspiImpl>::CredentialsHandle,
@@ -24,7 +24,7 @@ impl NtlmAuthProvier {
         server_computer_name: &str,
         sign: Option<bool>,
         seal: Option<bool>,
-    ) -> Self {
+    ) -> anyhow::Result<Self> {
         let identity = AuthIdentity {
             username: Username::parse(ldap_username).unwrap(),
             password: ldap_password.to_string().into(),
@@ -36,10 +36,9 @@ impl NtlmAuthProvier {
             .acquire_credentials_handle()
             .with_credential_use(CredentialUse::Outbound)
             .with_auth_data(&identity)
-            .execute()
-            .unwrap();
+            .execute()?;
 
-        Self {
+        Ok(Self {
             ntlm,
             credentials_handle: acq_cred_result.credentials_handle,
             server_computer_name: server_computer_name.to_string(),
@@ -48,7 +47,7 @@ impl NtlmAuthProvier {
             sequence_number: 0,
             recv_sequence_number: 0,
             status: None,
-        }
+        })
     }
 
     fn next_sequence_number(&mut self) -> u32 {
@@ -98,7 +97,7 @@ impl SecurityProvider for NtlmAuthProvier {
                 .ntlm
                 .initialize_security_context_impl(&mut builder)
                 .resolve_to_result()?;
-            self.status = Some(result.status.clone());
+            self.status = Some(result.status);
 
             if [
                 SecurityStatus::CompleteAndContinue,
@@ -114,7 +113,7 @@ impl SecurityProvider for NtlmAuthProvier {
         })
     }
 
-    fn encrypt(&mut self, input: Vec<u8>) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    fn encrypt(&mut self, input: &[u8]) -> Result<Vec<u8>, SecurityProviderError> {
         let mut msg_buffer = vec![
             SecurityBuffer::new(Vec::new(), SecurityBufferType::Token),
             SecurityBuffer::new(input.to_vec(), SecurityBufferType::Data),
@@ -128,7 +127,6 @@ impl SecurityProvider for NtlmAuthProvier {
         let length = msg_buffer[0].buffer.len() as u32
             + msg_buffer[1].buffer.len() as u32
             + msg_buffer[2].buffer.len() as u32;
-
         let length_bytes = length.to_be_bytes();
         output.extend_from_slice(&length_bytes);
         output.extend_from_slice(&msg_buffer[0].buffer);
@@ -137,13 +135,16 @@ impl SecurityProvider for NtlmAuthProvier {
         Ok(output)
     }
 
-    fn decrypt(&mut self, input: Vec<u8>) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-        let size = input[0..4].to_vec();
-        if u32::from_be_bytes(size.try_into().unwrap()) != input.len() as u32 - 4 {
-            return Err(Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "invalid message size",
-            )));
+    fn decrypt(&mut self, input: &[u8]) -> Result<Vec<u8>, SecurityProviderError> {
+        let length = u32::from_be_bytes([input[0], input[1], input[2], input[3]]);
+        tracing::debug!(
+            "Decrypting message with length: {} vs the len expected is {}",
+            input.len() as u32 - 4,
+            length
+        );
+
+        if length != input.len() as u32 - 4 {
+            return Err(SecurityProviderError::BufferNotLargeEnough(length + 4));
         }
         let first_16_bytes = input[4..20].to_vec();
         let rest = input[20..].to_vec();

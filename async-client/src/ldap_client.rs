@@ -19,7 +19,11 @@ use tokio::{
 use tokio_util::codec::Framed;
 
 use crate::{
-    authentication::{ntlm::NtlmAuthProvier, SecurityProvider},
+    authentication::{
+        kerberos::{KerberoInitParams, KerberoInitParamsBuilder, KerberoAuthProvier},
+        ntlm::NtlmAuthProvier,
+        SecurityProvider,
+    },
     encryption_stream::EncryptionStream,
     search::LdapSearchResultStream,
 };
@@ -72,10 +76,7 @@ where
     T: AsyncRead + AsyncWrite + Unpin,
 {
     pub async fn connect(stream: T) -> anyhow::Result<LdapAsyncClient<T>> {
-        let encryption_stream = EncryptionStream::new(
-            stream,
-            Box::new(crate::authentication::PlaceHolderSecurityProvider::default()),
-        );
+        let encryption_stream = EncryptionStream::new(stream);
         let framed = Framed::new(encryption_stream, LdapCodec::default());
         let session = LdapAsyncClient {
             frame: Arc::new(Mutex::new(framed)),
@@ -117,7 +118,7 @@ where
                     aliases: ldap3_proto::proto::LdapDerefAliases::Always,
                     attrs: attributes,
                 }),
-                ctrl: controls.unwrap_or_default().into(),
+                ctrl: controls.unwrap_or_default(),
             })
             .await
             .with_context(|| "Unable to send search request")?;
@@ -133,15 +134,12 @@ where
         attributes: Vec<LdapAttribute>,
         controls: Option<Vec<LdapControl>>,
     ) -> anyhow::Result<LdapMsg> {
-        let request = LdapAddRequest {
-            dn,
-            attributes: attributes,
-        };
+        let request = LdapAddRequest { dn, attributes };
 
         let msg = LdapMsg {
             msgid: self.next_message_id(),
             op: LdapOp::AddRequest(request),
-            ctrl: controls.unwrap_or_default().into(),
+            ctrl: controls.unwrap_or_default(),
         };
 
         let res = self.send_msg(msg).await?;
@@ -156,7 +154,7 @@ where
         let msg = LdapMsg {
             msgid: self.next_message_id(),
             op: LdapOp::DelRequest(dn),
-            ctrl: controls.unwrap_or_default().into(),
+            ctrl: controls.unwrap_or_default(),
         };
 
         let res = self.send_msg(msg).await?;
@@ -179,7 +177,7 @@ where
                 deleteoldrdn: delete_old_rdn,
                 new_superior,
             }),
-            ctrl: controls.unwrap_or_default().into(),
+            ctrl: controls.unwrap_or_default(),
         };
 
         let result = self.send_msg(msg).await?;
@@ -197,7 +195,7 @@ where
         let msg = LdapMsg {
             msgid: self.next_message_id(),
             op,
-            ctrl: controls.unwrap_or_default().into(),
+            ctrl: controls.unwrap_or_default(),
         };
 
         let res = self.send_msg(msg).await?;
@@ -218,7 +216,7 @@ where
                 atype: attribute,
                 val: value.as_bytes().to_vec(),
             }),
-            ctrl: controls.unwrap_or_default().into(),
+            ctrl: controls.unwrap_or_default(),
         };
 
         let res = self.send_msg(msg).await?;
@@ -267,7 +265,7 @@ where
                 dn: distinguished_name,
                 cred: LdapBindCred::Simple(password),
             }),
-            ctrl: controls.unwrap_or_default().into(),
+            ctrl: controls.unwrap_or_default(),
         };
 
         let res = self.send_msg(msg).await?;
@@ -285,7 +283,7 @@ where
         let msg = LdapMsg {
             msgid: self.next_message_id(),
             op: LdapOp::UnbindRequest,
-            ctrl: control.unwrap_or_default().into(),
+            ctrl: control.unwrap_or_default(),
         };
 
         self.frame
@@ -298,6 +296,7 @@ where
     }
 
     pub async fn sasl_bind(&mut self, config: SaslBindConfig) -> anyhow::Result<LdapBindResponse> {
+
         let SaslBindConfig {
             username,
             password,
@@ -316,7 +315,29 @@ where
                 &server_computer_name,
                 sign,
                 seal,
-            )),
+            )?),
+            SspiAuthMethod::Kerberos {
+                domain,
+                kdc_proxy_url,
+                server_computer_name,
+                client_computer_name,
+            } => {
+
+                let kerberos_param = KerberoInitParams::builder()
+                    .ldap_username(&username)
+                    .ldap_password(&password)
+                    .domain(domain.as_deref())
+                    .kdc_proxy_url(kdc_proxy_url.as_deref())
+                    .client_computer_name(&client_computer_name)
+                    .server_computer_name(&server_computer_name)
+                    .sign(sign)
+                    .seal(seal)
+                    .client(None)
+                    .build();
+                
+                let kerberos_auth_provider = KerberoAuthProvier::try_from(kerberos_param)?;
+                Box::new(kerberos_auth_provider)
+            },
             _ => todo!(),
         };
 
@@ -331,7 +352,7 @@ where
                     credentials: token,
                 }),
             }),
-            ctrl: controls.unwrap_or_default().into(),
+            ctrl: controls.unwrap_or_default(),
         };
 
         let frame_arc = self.frame.clone();
@@ -400,9 +421,10 @@ pub enum SspiAuthMethod {
         server_computer_name: String,
     },
     Kerberos {
-        domain: String,
-        kdc_proxy_url: String,
+        domain: Option<String>,
+        kdc_proxy_url: Option<String>,
         server_computer_name: String,
+        client_computer_name: String,
     },
     Negotiate {
         domain: Option<String>,
