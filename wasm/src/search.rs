@@ -59,14 +59,16 @@ impl LdapSearchResultStream {
             let error = loop {
                 let response = locked_frame.next().await;
 
-                if response.is_none() {
-                    break Err(JsErrorValue::new("no result present").to_js_value());
-                }
-                let response = response.unwrap();
-                if response.is_err() {
-                    break Err(JsErrorValue::new("error in response").to_js_value());
-                }
-                let response = response.unwrap();
+                let response = match response {
+                    Some(response) => response,
+                    None => {
+                        break Err(to_js_error!("Unable to get response from server").into());
+                    }
+                };
+                let response = match response {
+                    Ok(response) => response,
+                    Err(e) => break Err(JsErrorValue::new(e).to_js_value()),
+                };
                 let LdapMsg { op, ctrl, msgid } = response;
                 match op {
                     LdapOp::SearchResultEntry(entry) => {

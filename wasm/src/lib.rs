@@ -4,7 +4,7 @@ use wasm_bindgen::prelude::wasm_bindgen;
 
 pub mod authentication;
 pub mod dto;
-pub mod encryption_codec;
+pub mod encryption_stream;
 pub mod error;
 pub mod ldap_session;
 pub mod schema;

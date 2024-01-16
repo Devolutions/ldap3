@@ -6,7 +6,7 @@ use sspi::{
 };
 use tracing::debug;
 
-use super::{SecurityProvider, StepResult, WasmNetworkClient};
+use super::{SecurityProvider, StepResult, WasmNetworkClient, SecurityProviderError};
 pub struct NegotiateAuthProvier {
     negotiate: Negotiate,
     credentials_handle: <Negotiate as SspiImpl>::CredentialsHandle,
@@ -138,7 +138,7 @@ impl SecurityProvider for NegotiateAuthProvier {
         })
     }
 
-    fn encrypt(&mut self, input: Vec<u8>) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    fn encrypt(&mut self, input: Vec<u8>) -> Result<Vec<u8>, SecurityProviderError> {
         let mut msg_buffer = vec![SecurityBuffer::new(input, SecurityBufferType::Stream)];
 
         let seq = self.next_sequence_number();
@@ -147,7 +147,7 @@ impl SecurityProvider for NegotiateAuthProvier {
         Ok(msg_buffer[0].buffer.clone())
     }
 
-    fn decrypt(&mut self, input: Vec<u8>) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    fn decrypt(&mut self, input: Vec<u8>) -> Result<Vec<u8>, SecurityProviderError> {
         let mut msg_buffer = vec![SecurityBuffer::new(input, SecurityBufferType::Stream)];
         let seq = self.next_sequence_number();
         self.negotiate.decrypt_message(&mut msg_buffer, seq)?;
