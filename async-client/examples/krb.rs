@@ -1,4 +1,5 @@
-use async_client::ldap_client::{LdapAsyncClient, SaslBindConfig};
+use async_client::ldap_client::{LdapAsyncClient, SaslBindConfig, SearchParameters};
+use futures_util::StreamExt;
 use sspi::kerberos::client;
 use tokio::net::TcpStream;
 
@@ -18,6 +19,11 @@ pub async fn main() -> anyhow::Result<()> {
     let password = "DevoLabs123!".to_string();
     let sign = Some(true);
     let seal = Some(true);
+    
+    let search_base = "dc=ad,dc=it-help,dc=ninja".to_string();
+    let filter = "(objectClass=*)".to_string();
+    let scope = ldap3_proto::LdapSearchScope::Subtree;
+    let attributes = vec!["*".to_string()];
 
     let stream = TcpStream::connect("10.10.0.3:389").await.unwrap();
     let mut session = LdapAsyncClient::connect(stream).await?;
@@ -38,5 +44,24 @@ pub async fn main() -> anyhow::Result<()> {
         })
         .await?;
     tracing::info!("bind success");
+
+
+    let mut search_stream = session
+        .search(SearchParameters {
+            search_base,
+            filter,
+            scope,
+            attributes,
+            controls: None,
+            size_limit: Some(10), // stress test
+            time_limit: None,
+        })
+        .await?;
+
+    if let Some(msg) = search_stream.next().await {
+        tracing::info!("msg is: {:?}", msg);
+    }
+    
+
     Ok(())
 }

@@ -378,9 +378,15 @@ where
             match bind_response.res.code {
                 LdapResultCode::Success => {
                     tracing::trace!("bind success");
-                    let status = auth_provider.status();
-                    tracing::debug!("bind is successfully finished, status : {:?}", status);
-                    frame.get_mut().set_encryption(auth_provider);
+                    if sign.unwrap_or(false) && !seal.unwrap_or(false) {
+                        anyhow::bail!("sign without seal is not currently supported");
+                    }
+
+                    if seal.unwrap_or(false) {
+                        tracing::debug!("seal is required, setting encryption");
+                        frame.get_mut().set_encryption(auth_provider);
+                    }
+
                     break Ok(bind_response);
                 }
                 LdapResultCode::SaslBindInProgress => {

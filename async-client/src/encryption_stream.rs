@@ -39,7 +39,7 @@ where
         buf: &mut ReadBuf<'_>,
     ) -> Poll<std::io::Result<()>> {
         if !self.decryption_buf.is_empty() {
-            tracing::debug!("The decryption buffer is not empty, reading from it. buf.remaining = {}, decryption buffer = {}", buf.remaining(), self.decryption_buf.len());
+            tracing::trace!("The decryption buffer is not empty, reading from it. buf.remaining = {}, decryption buffer = {}", buf.remaining(), self.decryption_buf.len());
             let data_to_read = std::cmp::min(self.decryption_buf.len(), buf.remaining());
             buf.put_slice(&self.decryption_buf[..data_to_read]);
             self.decryption_buf.drain(..data_to_read);
@@ -73,15 +73,16 @@ where
             }
             Err(e) => {
                 return Poll::Ready(match e {
-                    SecurityProviderError::SspiError(e) => Err(std::io::Error::new(
-                        std::io::ErrorKind::Other,
-                        e.to_string(),
-                    )),
-                    SecurityProviderError::IoError(e) => Err(e),
-                    SecurityProviderError::BufferNotLargeEnough(size) => {
-                        tracing::debug!("buffer not large enough, size = {}, read again", size);
+                    SecurityProviderError::BufferNotLargeEnough(_) => {
                         cx.waker().wake_by_ref();
                         return Poll::Pending;
+                    }
+                    SecurityProviderError::IoError(e) => Err(e),
+                    SecurityProviderError::Unreachable(e) => {
+                        Err(std::io::Error::new(std::io::ErrorKind::Other, e))
+                    }
+                    SecurityProviderError::SspiError(e) => {
+                        Err(std::io::Error::new(std::io::ErrorKind::Other, e))
                     }
                 })
             }
@@ -97,7 +98,7 @@ where
             self.decryption_buf.clear();
             self.decryption_buf.extend_from_slice(&left_over);
         } else {
-            tracing::debug!(
+            tracing::trace!(
                 "Decrypted payload is smaller than or equal to buf, return decrypted payload"
             );
             buf.put_slice(&decrypted_payload);
@@ -126,7 +127,7 @@ where
             }
         };
 
-        tracing::debug!(
+        tracing::trace!(
             "encrypted poll write payload,size = {:?},original size = {:?}",
             encrypted_payload.len(),
             buf.len()
@@ -146,7 +147,6 @@ where
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<std::io::Result<()>> {
-        tracing::debug!("poll flush");
         Pin::new(&mut self.inner).poll_flush(cx)
     }
 
@@ -154,7 +154,6 @@ where
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<std::io::Result<()>> {
-        tracing::debug!("poll shutdown");
         Pin::new(&mut self.inner).poll_shutdown(cx)
     }
 }
