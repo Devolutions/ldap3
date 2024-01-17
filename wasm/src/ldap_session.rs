@@ -380,7 +380,20 @@ impl LdapSession {
             match bind_response.res.code {
                 LdapResultCode::Success => {
                     tracing::trace!("bind success");
-                    frame.get_mut().set_encryption(auth_provider);
+
+                    if !sign.unwrap_or(false) && seal.is_some_and(|s| s) {
+                        // break error saying that sign without seal is not supported
+                        break Err(to_js_error!(
+                            "sign without seal is not supported, please set seal to true"
+                        ));
+                    }
+
+                    if seal.unwrap_or(false) {
+                        tracing::trace!("setting encryption");
+                        frame.get_mut().set_encryption(auth_provider);
+                    }
+
+                   
                     break Ok(serde_wasm_bindgen::to_value(&bind_response)?);
                 }
                 LdapResultCode::SaslBindInProgress => {
