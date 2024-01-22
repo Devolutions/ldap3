@@ -20,7 +20,7 @@ use tokio_util::codec::Framed;
 
 use crate::{
     authentication::{
-        kerberos::{KerberoInitParams, KerberoInitParamsBuilder, KerberoAuthProvier},
+        kerberos::{KerberoAuthProvier, KerberoInitParams},
         ntlm::NtlmAuthProvier,
         SecurityProvider,
     },
@@ -296,7 +296,6 @@ where
     }
 
     pub async fn sasl_bind(&mut self, config: SaslBindConfig) -> anyhow::Result<LdapBindResponse> {
-
         let SaslBindConfig {
             username,
             password,
@@ -322,7 +321,6 @@ where
                 server_computer_name,
                 client_computer_name,
             } => {
-
                 let kerberos_param = KerberoInitParams::builder()
                     .ldap_username(&username)
                     .ldap_password(&password)
@@ -334,10 +332,10 @@ where
                     .seal(seal)
                     .client(None)
                     .build();
-                
+
                 let kerberos_auth_provider = KerberoAuthProvier::try_from(kerberos_param)?;
                 Box::new(kerberos_auth_provider)
-            },
+            }
             _ => todo!(),
         };
 

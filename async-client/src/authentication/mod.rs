@@ -1,10 +1,7 @@
-use std::sync::Arc;
-
 use anyhow::Context;
 use futures_util::future::{BoxFuture, LocalBoxFuture};
 
-use sspi::{generator::NetworkRequest};
-use tokio::net;
+use sspi::generator::NetworkRequest;
 
 pub mod kerberos;
 pub mod negotiate;
@@ -48,7 +45,7 @@ impl SecurityProvider for DummySecurityProvider {
 }
 
 pub trait AsyncNetworkClient {
-    fn send<'a>(&'a self, network_request: NetworkRequest) -> BoxFuture<'a, anyhow::Result<Vec<u8>>>;
+    fn send(&self, network_request: NetworkRequest) -> BoxFuture<'_, anyhow::Result<Vec<u8>>>;
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -58,15 +55,21 @@ pub struct SspiDefaultNetworkClient(
 );
 
 #[cfg(not(target_arch = "wasm32"))]
+impl Default for SspiDefaultNetworkClient {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SspiDefaultNetworkClient {
     pub fn new() -> Self {
-        Self(sspi::network_client::reqwest_network_client::ReqwestNetworkClient::default())
+        Self(sspi::network_client::reqwest_network_client::ReqwestNetworkClient)
     }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 impl AsyncNetworkClient for SspiDefaultNetworkClient {
-    fn send<'a>(&'a self, network_request: NetworkRequest) -> BoxFuture<'a, anyhow::Result<Vec<u8>>> {
+    fn send(&self, network_request: NetworkRequest) -> BoxFuture<'_, anyhow::Result<Vec<u8>>> {
         let self_clone = self.clone();
         Box::pin(async move {
             tracing::debug!("Sending network request: {:?}", network_request);
@@ -90,7 +93,7 @@ pub enum SecurityProviderError {
     #[error("Buffer not large enough,expected {0}")]
     BufferNotLargeEnough(u32),
     #[error("unexpected error {0}")]
-    Unreachable(String)
+    Unreachable(String),
 }
 
 impl From<sspi::Error> for SecurityProviderError {

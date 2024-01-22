@@ -108,7 +108,7 @@
 //                     .with_output(&mut output_buffer);
 
 //             let result = {
-//                 let clinet = WasmNetworkClient;
+//                 let client = WasmNetworkClient;
 //                 let mut generator = self
 //                     .negotiate
 //                     .initialize_security_context_impl(&mut builder);
@@ -117,7 +117,7 @@
 //                 loop {
 //                     match state {
 //                         sspi::generator::GeneratorState::Suspended(req) => {
-//                             let res = clinet.send(&req).await;
+//                             let res = client.send(&req).await;
 //                             state = generator.resume(Ok(res));
 //                         }
 //                         sspi::generator::GeneratorState::Completed(v) => break v,

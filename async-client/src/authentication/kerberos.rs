@@ -7,7 +7,7 @@ use sspi::{
 };
 use tracing::debug;
 
-use super::{AsyncNetworkClient, SecurityProvider, StepResult, SecurityProviderError};
+use super::{AsyncNetworkClient, SecurityProvider, SecurityProviderError, StepResult};
 
 pub struct KerberoAuthProvier {
     kerbero: Kerberos,
@@ -57,7 +57,7 @@ impl KerberoAuthProvier {
 
         let username = match Username::parse(ldap_username) {
             Ok(username) => username,
-            Err(_) => Username::new(ldap_username, domain.as_deref())
+            Err(_) => Username::new(ldap_username, domain)
                 .with_context(|| format!("Failed to parse username: {}", ldap_username))?,
         };
 
@@ -200,13 +200,21 @@ impl SecurityProvider for KerberoAuthProvier {
 
         self.context_status = Some(status);
 
-        let token_buffer = msg_buffer.pop().ok_or(SecurityProviderError::Unreachable("missing token buffer".to_string()))?;
-        let data_buffer = msg_buffer.pop().ok_or(SecurityProviderError::Unreachable("missing data buffer".to_string()))?;
-        let padding_buffer = msg_buffer.pop().ok_or(SecurityProviderError::Unreachable("missing padding buffer".to_string()))?;
+        let token_buffer = msg_buffer.pop().ok_or(SecurityProviderError::Unreachable(
+            "missing token buffer".to_string(),
+        ))?;
+        let data_buffer = msg_buffer.pop().ok_or(SecurityProviderError::Unreachable(
+            "missing data buffer".to_string(),
+        ))?;
+        let padding_buffer = msg_buffer.pop().ok_or(SecurityProviderError::Unreachable(
+            "missing padding buffer".to_string(),
+        ))?;
 
         let SecurityBuffer { buffer: token, .. } = token_buffer;
         let SecurityBuffer { buffer: data, .. } = data_buffer;
-        let SecurityBuffer { buffer: padding, .. } = padding_buffer;
+        let SecurityBuffer {
+            buffer: padding, ..
+        } = padding_buffer;
 
         let mut output = token;
         output.extend_from_slice(&data);
@@ -224,18 +232,18 @@ impl SecurityProvider for KerberoAuthProvier {
         if length != input.len() as u32 - 4 {
             return Err(SecurityProviderError::BufferNotLargeEnough(length + 4));
         }
-        
+
         let rest = input[4..].to_vec();
 
-        let mut msg_buffer = vec![
-            SecurityBuffer::new(rest, SecurityBufferType::Stream),
-        ];
+        let mut msg_buffer = vec![SecurityBuffer::new(rest, SecurityBufferType::Stream)];
 
         let seq = self.next_recv_sequence_number();
 
         self.kerbero.decrypt_message(&mut msg_buffer, seq)?;
 
-        let SecurityBuffer { buffer: data, .. } = msg_buffer.pop().ok_or(SecurityProviderError::Unreachable("missing data buffer".to_string()))?;
+        let SecurityBuffer { buffer: data, .. } = msg_buffer.pop().ok_or(
+            SecurityProviderError::Unreachable("missing data buffer".to_string()),
+        )?;
 
         Ok(data)
     }

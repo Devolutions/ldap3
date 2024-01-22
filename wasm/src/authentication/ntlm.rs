@@ -140,7 +140,11 @@ impl SecurityProvider for NtlmAuthProvier {
 
     fn decrypt(&mut self, input: Vec<u8>) -> Result<Vec<u8>, SecurityProviderError> {
         let length = u32::from_be_bytes([input[0], input[1], input[2], input[3]]);
-        tracing::debug!("Decrypting message with length: {} vs the len expected is {}", input.len() as u32 -4, length);
+        tracing::debug!(
+            "Decrypting message with length: {} vs the len expected is {}",
+            input.len() as u32 - 4,
+            length
+        );
 
         if length != input.len() as u32 - 4 {
             return Err(SecurityProviderError::BufferNotLargeEnough(length + 4).into());
@@ -157,4 +161,3 @@ impl SecurityProvider for NtlmAuthProvier {
         Ok(msg_buffer[1].buffer.clone())
     }
 }
-

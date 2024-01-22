@@ -6,7 +6,7 @@ use sspi::{
 };
 use tracing::debug;
 
-use super::{SecurityProvider, StepResult, WasmNetworkClient, SecurityProviderError};
+use super::{SecurityProvider, SecurityProviderError, StepResult, WasmNetworkClient};
 pub struct KerberoAuthProvier {
     kerbero: Kerberos,
     credentials_handle: <Kerberos as SspiImpl>::CredentialsHandle,

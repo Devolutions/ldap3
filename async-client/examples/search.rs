@@ -1,14 +1,7 @@
-
-
-use async_client::{
-    ldap_client::{LdapAsyncClient, SaslBindConfig, SearchParameters},
-};
+use async_client::ldap_client::{LdapAsyncClient, SaslBindConfig, SearchParameters};
 use futures_util::StreamExt;
 
-use tokio::{
-    net::TcpStream,
-};
-
+use tokio::net::TcpStream;
 
 #[tokio::main]
 pub async fn main() -> anyhow::Result<()> {
