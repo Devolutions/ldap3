@@ -21,7 +21,10 @@ use tracing::instrument;
 
 use crate::{
     authentication::{
-        kerberos::{KerberoAuthProvier, KerberoInitParams}, negotiate::NegotiateAuthProvier, ntlm::NtlmAuthProvier, SecurityProvider
+        kerberos::{KerberoAuthProvier, KerberoInitParams},
+        negotiate::NegotiateAuthProvier,
+        ntlm::NtlmAuthProvier,
+        SecurityProvider,
     },
     encryption_stream::EncryptionStream,
     search::LdapSearchResultStream,
@@ -339,7 +342,12 @@ where
                 let kerberos = KerberoAuthProvier::try_from(kerberos_param)?;
                 Box::new(kerberos)
             }
-            SspiAuthMethod::Negotiate { domain, kdc_url, server_computer_name, client_computer_name } => {
+            SspiAuthMethod::Negotiate {
+                domain,
+                kdc_url,
+                server_computer_name,
+                client_computer_name,
+            } => {
                 let kerberos_param = KerberoInitParams::builder()
                     .ldap_username(&username)
                     .ldap_password(&password)

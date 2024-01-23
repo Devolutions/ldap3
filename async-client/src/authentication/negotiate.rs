@@ -1,13 +1,14 @@
-use std::ops::Neg;
-
 use futures_util::future::LocalBoxFuture;
 use sspi::{
-    builders::EmptyInitializeSecurityContext, network_client, ntlm::NtlmConfig, AuthIdentity, ClientRequestFlags, CredentialUse, DataRepresentation, EncryptionFlags, KerberosConfig, Negotiate, NegotiateConfig, SecurityBuffer, SecurityBufferType, SecurityStatus, Sspi, SspiImpl, Username
+    builders::EmptyInitializeSecurityContext, ntlm::NtlmConfig, AuthIdentity, ClientRequestFlags,
+    CredentialUse, DataRepresentation, EncryptionFlags, KerberosConfig, Negotiate, NegotiateConfig,
+    SecurityBuffer, SecurityBufferType, SecurityStatus, Sspi, SspiImpl, Username,
 };
 use tracing::debug;
 
 use super::{
-    kerberos::KerberoInitParams, AsyncNetworkClient, SecurityProvider, SecurityProviderError, StepResult
+    kerberos::KerberoInitParams, AsyncNetworkClient, SecurityProvider, SecurityProviderError,
+    StepResult,
 };
 pub struct NegotiateAuthProvier {
     negotiate: Negotiate,
@@ -202,10 +203,14 @@ impl SecurityProvider for NegotiateAuthProvier {
         if length != input.len() as u32 - 4 {
             return Err(SecurityProviderError::BufferNotLargeEnough(length + 4));
         }
-        let token_size = match self.negotiate.query_context_negotiation_package()?.name{
+        let token_size = match self.negotiate.query_context_negotiation_package()?.name {
             sspi::SecurityPackageType::Ntlm => 16,
             sspi::SecurityPackageType::Kerberos => 60,
-            _ => return Err(SecurityProviderError::Other("unsupported negotiation package".to_string()))
+            _ => {
+                return Err(SecurityProviderError::Other(
+                    "unsupported negotiation package".to_string(),
+                ))
+            }
         };
         let rest = input[4..].to_vec();
         let mut msg_buffer = vec![

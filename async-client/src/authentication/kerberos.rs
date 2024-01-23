@@ -1,7 +1,9 @@
 use anyhow::Context;
 use futures_util::future::LocalBoxFuture;
 use sspi::{
-    builders::EmptyInitializeSecurityContext, detect_kdc_url, kerberos::client, AuthIdentity, ClientRequestFlags, CredentialUse, DataRepresentation, EncryptionFlags, Kerberos, KerberosConfig, SecurityBuffer, SecurityBufferType, SecurityStatus, Sspi, SspiImpl, Username
+    builders::EmptyInitializeSecurityContext, detect_kdc_url, AuthIdentity, ClientRequestFlags,
+    CredentialUse, DataRepresentation, EncryptionFlags, Kerberos, KerberosConfig, SecurityBuffer,
+    SecurityBufferType, SecurityStatus, Sspi, SspiImpl, Username,
 };
 use tracing::debug;
 
