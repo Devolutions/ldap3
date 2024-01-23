@@ -17,12 +17,11 @@ use tokio::{
     sync::Mutex,
 };
 use tokio_util::codec::Framed;
+use tracing::instrument;
 
 use crate::{
     authentication::{
-        kerberos::{KerberoAuthProvier, KerberoInitParams},
-        ntlm::NtlmAuthProvier,
-        SecurityProvider,
+        kerberos::{KerberoAuthProvier, KerberoInitParams}, negotiate::NegotiateAuthProvier, ntlm::NtlmAuthProvier, SecurityProvider
     },
     encryption_stream::EncryptionStream,
     search::LdapSearchResultStream,
@@ -85,6 +84,7 @@ where
         Ok(session)
     }
 
+    #[instrument(skip(self))]
     pub async fn search(
         &mut self,
         search_parameters: SearchParameters,
@@ -253,6 +253,7 @@ impl<T> LdapAsyncClient<T>
 where
     T: AsyncRead + AsyncWrite + Unpin,
 {
+    #[instrument(skip(self))]
     pub async fn bind(
         &mut self,
         distinguished_name: String,
@@ -279,6 +280,7 @@ where
         }
     }
 
+    #[instrument(skip(self))]
     pub async fn unbind(&mut self, control: Option<Vec<LdapControl>>) -> anyhow::Result<()> {
         let msg = LdapMsg {
             msgid: self.next_message_id(),
@@ -295,6 +297,7 @@ where
         Ok(())
     }
 
+    #[instrument(skip(self))]
     pub async fn sasl_bind(&mut self, config: SaslBindConfig) -> anyhow::Result<LdapBindResponse> {
         let SaslBindConfig {
             username,
@@ -317,7 +320,7 @@ where
             )?),
             SspiAuthMethod::Kerberos {
                 domain,
-                kdc_proxy_url,
+                kdc_url: kdc_proxy_url,
                 server_computer_name,
                 client_computer_name,
             } => {
@@ -333,10 +336,25 @@ where
                     .client(None)
                     .build();
 
-                let kerberos_auth_provider = KerberoAuthProvier::try_from(kerberos_param)?;
-                Box::new(kerberos_auth_provider)
+                let kerberos = KerberoAuthProvier::try_from(kerberos_param)?;
+                Box::new(kerberos)
             }
-            _ => todo!(),
+            SspiAuthMethod::Negotiate { domain, kdc_url, server_computer_name, client_computer_name } => {
+                let kerberos_param = KerberoInitParams::builder()
+                    .ldap_username(&username)
+                    .ldap_password(&password)
+                    .domain(domain.as_deref())
+                    .kdc_proxy_url(kdc_url.as_deref())
+                    .client_computer_name(&client_computer_name)
+                    .server_computer_name(&server_computer_name)
+                    .sign(sign)
+                    .seal(seal)
+                    .client(None)
+                    .build();
+
+                let negotiate = NegotiateAuthProvier::try_from(kerberos_param)?;
+                Box::new(negotiate)
+            }
         };
 
         let token = auth_provider.step(&[]).await.unwrap();
@@ -426,13 +444,14 @@ pub enum SspiAuthMethod {
     },
     Kerberos {
         domain: Option<String>,
-        kdc_proxy_url: Option<String>,
+        kdc_url: Option<String>,
         server_computer_name: String,
         client_computer_name: String,
     },
     Negotiate {
         domain: Option<String>,
-        kdc_proxy_url: Option<String>,
+        kdc_url: Option<String>,
         server_computer_name: String,
+        client_computer_name: String,
     },
 }

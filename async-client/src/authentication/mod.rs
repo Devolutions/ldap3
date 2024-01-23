@@ -92,8 +92,10 @@ pub enum SecurityProviderError {
     IoError(std::io::Error),
     #[error("Buffer not large enough,expected {0}")]
     BufferNotLargeEnough(u32),
-    #[error("unexpected error {0}")]
+    #[error("Should never happen error {0}")]
     Unreachable(String),
+    #[error("unexpected error {0}")]
+    Other(String),
 }
 
 impl From<sspi::Error> for SecurityProviderError {

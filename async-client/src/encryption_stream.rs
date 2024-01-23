@@ -78,12 +78,11 @@ where
                         return Poll::Pending;
                     }
                     SecurityProviderError::IoError(e) => Err(e),
-                    SecurityProviderError::Unreachable(e) => {
-                        Err(std::io::Error::new(std::io::ErrorKind::Other, e))
-                    }
+
                     SecurityProviderError::SspiError(e) => {
                         Err(std::io::Error::new(std::io::ErrorKind::Other, e))
                     }
+                    _ => Err(std::io::Error::new(std::io::ErrorKind::Other, e)),
                 })
             }
         };

@@ -32,7 +32,7 @@ pub async fn main() -> anyhow::Result<()> {
         .sasl_bind(SaslBindConfig {
             auth_method: async_client::ldap_client::SspiAuthMethod::Kerberos {
                 domain: None,
-                kdc_proxy_url: None,
+                kdc_url: None,
                 server_computer_name,
                 client_computer_name,
             },

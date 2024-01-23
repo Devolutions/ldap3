@@ -1,9 +1,7 @@
 use anyhow::Context;
 use futures_util::future::LocalBoxFuture;
 use sspi::{
-    builders::EmptyInitializeSecurityContext, detect_kdc_url, AuthIdentity, ClientRequestFlags,
-    CredentialUse, DataRepresentation, EncryptionFlags, Kerberos, KerberosConfig, SecurityBuffer,
-    SecurityBufferType, SecurityStatus, Sspi, SspiImpl, Username,
+    builders::EmptyInitializeSecurityContext, detect_kdc_url, kerberos::client, AuthIdentity, ClientRequestFlags, CredentialUse, DataRepresentation, EncryptionFlags, Kerberos, KerberosConfig, SecurityBuffer, SecurityBufferType, SecurityStatus, Sspi, SspiImpl, Username
 };
 use tracing::debug;
 
@@ -97,6 +95,9 @@ impl KerberoAuthProvier {
 
         #[cfg(not(target_arch = "wasm32"))]
         let client = client.unwrap_or(Box::new(super::SspiDefaultNetworkClient::new()));
+
+        #[cfg(target_arch = "wasm32")]
+        let client = client.unwrap();
 
         let res = Self {
             kerbero,
@@ -192,34 +193,19 @@ impl SecurityProvider for KerberoAuthProvier {
             SecurityBuffer::new(input.to_vec(), SecurityBufferType::Data),
             SecurityBuffer::new(Vec::new(), SecurityBufferType::Padding),
         ];
-
         let seq = self.next_sequence_number();
-        let status =
-            self.kerbero
-                .encrypt_message(EncryptionFlags::empty(), &mut msg_buffer, seq)?;
+        self.kerbero
+            .encrypt_message(EncryptionFlags::empty(), &mut msg_buffer, seq)?;
 
-        self.context_status = Some(status);
-
-        let token_buffer = msg_buffer.pop().ok_or(SecurityProviderError::Unreachable(
-            "missing token buffer".to_string(),
-        ))?;
-        let data_buffer = msg_buffer.pop().ok_or(SecurityProviderError::Unreachable(
-            "missing data buffer".to_string(),
-        ))?;
-        let padding_buffer = msg_buffer.pop().ok_or(SecurityProviderError::Unreachable(
-            "missing padding buffer".to_string(),
-        ))?;
-
-        let SecurityBuffer { buffer: token, .. } = token_buffer;
-        let SecurityBuffer { buffer: data, .. } = data_buffer;
-        let SecurityBuffer {
-            buffer: padding, ..
-        } = padding_buffer;
-
-        let mut output = token;
-        output.extend_from_slice(&data);
-        output.extend_from_slice(&padding);
-
+        let mut output = Vec::new();
+        let length = msg_buffer[0].buffer.len() as u32
+            + msg_buffer[1].buffer.len() as u32
+            + msg_buffer[2].buffer.len() as u32;
+        let length_bytes = length.to_be_bytes();
+        output.extend_from_slice(&length_bytes);
+        output.extend_from_slice(&msg_buffer[0].buffer);
+        output.extend_from_slice(&msg_buffer[1].buffer);
+        output.extend_from_slice(&msg_buffer[2].buffer);
         Ok(output)
     }
 
@@ -234,8 +220,10 @@ impl SecurityProvider for KerberoAuthProvier {
         }
 
         let rest = input[4..].to_vec();
-
-        let mut msg_buffer = vec![SecurityBuffer::new(rest, SecurityBufferType::Stream)];
+        let mut msg_buffer = vec![
+            SecurityBuffer::new(rest[..60].to_vec(), SecurityBufferType::Token),
+            SecurityBuffer::new(rest[60..].to_vec(), SecurityBufferType::Data),
+        ];
 
         let seq = self.next_recv_sequence_number();
 
