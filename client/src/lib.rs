@@ -78,7 +78,7 @@ impl From<LdapResultCode> for LdapError {
     fn from(code: LdapResultCode) -> Self {
         match code {
             LdapResultCode::InvalidCredentials => LdapError::InvalidCredentials,
-            LdapResultCode::InsufficentAccessRights => LdapError::InsufficentAccessRights,
+            LdapResultCode::InsufficientAccessRights => LdapError::InsufficentAccessRights,
             LdapResultCode::EsyncRefreshRequired => LdapError::EsyncRefreshRequired,
             LdapResultCode::UnavailableCriticalExtension => LdapError::UnavailableCriticalExtension,
             LdapResultCode::UnwillingToPerform => LdapError::UnwillingToPerform,

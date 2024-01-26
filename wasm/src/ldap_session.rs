@@ -2,7 +2,9 @@
 // this is because Tsify and wasm-bindgen generates name in PascalCase, will look for solution later
 use crate::{
     authentication::{
-        kerberos::KerberoAuthProvier, negotiate::NegotiateAuthProvier, ntlm::NtlmAuthProvier,
+        kerberos::{KerberoAuthProvier, KerberoInitParams},
+        negotiate::NegotiateAuthProvier,
+        ntlm::NtlmAuthProvier,
         SecurityProvider,
     },
     dto::control::LdapControlArray,
@@ -13,6 +15,7 @@ use crate::{
 use async_io_stream::IoStream;
 use futures_util::sink::SinkExt;
 use futures_util::StreamExt;
+
 use std::sync::Arc;
 
 use ldap3_proto::{
@@ -68,9 +71,9 @@ impl LdapSession {
 }
 
 /*
-!Important: currently, in order to remain the sequence of messages to be recevied in the same order as they were sent,
+!Important: currently, in order to remain the sequence of messages to be received in the same order as they were sent,
             we lock the frame while sending a message and receiving the response. This is not ideal, but it works for now.
-            in the future, we should have some machanism to ensure that the messages are received in the same order as they were sent
+            in the future, we should have some mechanism to ensure that the messages are received in the same order as they were sent
             as well as to avoid locking the frame while waiting for a response.
 
 Note: for those who wonder why I write code this way, Is because until today, 2023,Dec, it is still very hard to have a typed value and struct to pass
@@ -314,41 +317,49 @@ impl LdapSession {
         let mut auth_provider: Box<dyn SecurityProvider> = match auth_method {
             SspiAuthMethod::Ntlm {
                 server_computer_name,
-            } => Box::new(NtlmAuthProvier::new(
-                &username,
-                &password,
-                &server_computer_name,
-                sign,
-                seal,
-            )),
+            } => {
+                let res =
+                    NtlmAuthProvier::new(&username, &password, &server_computer_name, sign, seal)?;
+                Box::new(res)
+            }
             SspiAuthMethod::Kerberos {
                 domain,
                 kdc_proxy_url,
                 server_computer_name,
-            } => Box::new(KerberoAuthProvier::new(
-                &username,
-                &password,
-                &domain,
-                &kdc_proxy_url,
-                &server_computer_name,
-                &server_computer_name,
-                sign,
-                seal,
-            )),
+            } => {
+                let builder = KerberoInitParams::builder()
+                    .ldap_username(&username)
+                    .ldap_password(&password)
+                    .domain(Some(&domain))
+                    .kdc_proxy_url(Some(&kdc_proxy_url))
+                    .client_computer_name("client_computer_name")
+                    .server_computer_name(&server_computer_name)
+                    .sign(sign)
+                    .seal(seal)
+                    .client(None)
+                    .build();
+                let kerberos = KerberoAuthProvier::try_from(builder)?;
+                Box::new(kerberos)
+            }
             SspiAuthMethod::Negotiate {
                 domain,
                 kdc_proxy_url,
                 server_computer_name,
-            } => Box::new(NegotiateAuthProvier::new(
-                &username,
-                &password,
-                domain.as_deref(),
-                kdc_proxy_url.as_deref(),
-                &server_computer_name,
-                &server_computer_name,
-                sign,
-                seal,
-            )),
+            } => {
+                let builder = KerberoInitParams::builder()
+                    .ldap_username(&username)
+                    .ldap_password(&password)
+                    .domain(domain.as_deref())
+                    .kdc_proxy_url(kdc_proxy_url.as_deref())
+                    .client_computer_name("client_computer_name")
+                    .server_computer_name(&server_computer_name)
+                    .sign(sign)
+                    .seal(seal)
+                    .client(None)
+                    .build();
+                let negotiate = NegotiateAuthProvier::try_from(builder)?;
+                Box::new(negotiate)
+            }
         };
 
         let token = auth_provider.step(&[]).await.unwrap();
@@ -402,7 +413,8 @@ impl LdapSession {
                         frame.get_mut().set_encryption(auth_provider);
                     }
 
-                    break Ok(serde_wasm_bindgen::to_value(&bind_response)?);
+                    break Ok(serde_wasm_bindgen::to_value(&bind_response)
+                        .expect("unable to serialize bind response"));
                 }
                 LdapResultCode::SaslBindInProgress => {
                     if let Some(ref cred) = bind_response.saslcreds {

@@ -1,7 +1,7 @@
 {
   "name": "@devolutions/ldap-wasm-js",
   "version": "0.2.12",
-  "description": "a ldap pacakges exposes RUST LDAP3 to Javascript in Browser",
+  "description": "a ldap packages exposes RUST LDAP3 to Javascript in Browser",
   "email": "jou@devolutions.net",
   "main": "./dist/ldap-wasm-js.js",
   "types": "./dist/pkg/ldap3_wasm.d.ts",

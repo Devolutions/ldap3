@@ -1,7 +1,7 @@
-use futures_util::future::LocalBoxFuture;
+use anyhow::Context;
+use futures_util::future::{BoxFuture, LocalBoxFuture};
 
-use sspi::{generator::NetworkRequest, network_client::NetworkProtocol};
-use tracing::debug;
+use sspi::generator::NetworkRequest;
 
 pub mod kerberos;
 pub mod negotiate;
@@ -16,34 +16,72 @@ pub trait SecurityProvider {
     // we are using wasm, so we dont need Send on the future, LocalBoxFuture is fine
     fn step<'a>(&'a mut self, input: &'a [u8]) -> LocalBoxFuture<'a, StepResult>;
 
-    fn encrypt(&mut self, input: Vec<u8>) -> Result<Vec<u8>, SecurityProviderError>;
+    fn encrypt(&mut self, input: &[u8]) -> Result<Vec<u8>, SecurityProviderError>;
 
-    fn decrypt(&mut self, input: Vec<u8>) -> Result<Vec<u8>, SecurityProviderError>;
+    fn decrypt(&mut self, input: &[u8]) -> Result<Vec<u8>, SecurityProviderError>;
+
+    fn status(&self) -> Option<sspi::SecurityStatus>;
 }
 
-#[derive(Debug)]
-pub(crate) struct WasmNetworkClient;
+#[derive(Debug, Default)]
+pub struct DummySecurityProvider;
 
-impl WasmNetworkClient {
-    async fn send(&self, network_request: &NetworkRequest) -> Vec<u8> {
-        debug!(?network_request.protocol, ?network_request.url);
-        match &network_request.protocol {
-            NetworkProtocol::Http | NetworkProtocol::Https => {
-                let body = js_sys::Uint8Array::from(&network_request.data[..]);
+impl SecurityProvider for DummySecurityProvider {
+    fn step<'a>(&'a mut self, _input: &'a [u8]) -> LocalBoxFuture<'a, StepResult> {
+        unreachable!()
+    }
 
-                gloo_net::http::Request::post(network_request.url.as_str())
-                    .header("keep-alive", "true")
-                    .body(body)
-                    .unwrap()
-                    .send()
-                    .await
-                    .unwrap()
-                    .binary()
-                    .await
-                    .unwrap()
-            }
-            _ => panic!("unsupported protocol for KDC proxy"),
-        }
+    fn encrypt(&mut self, input: &[u8]) -> Result<Vec<u8>, SecurityProviderError> {
+        Ok(input.to_vec())
+    }
+
+    fn decrypt(&mut self, input: &[u8]) -> Result<Vec<u8>, SecurityProviderError> {
+        Ok(input.to_vec())
+    }
+
+    fn status(&self) -> Option<sspi::SecurityStatus> {
+        unreachable!()
+    }
+}
+
+pub trait AsyncNetworkClient {
+    fn send(&self, network_request: NetworkRequest) -> BoxFuture<'_, anyhow::Result<Vec<u8>>>;
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Debug, Clone)]
+pub struct SspiDefaultNetworkClient(
+    sspi::network_client::reqwest_network_client::ReqwestNetworkClient,
+);
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Default for SspiDefaultNetworkClient {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl SspiDefaultNetworkClient {
+    pub fn new() -> Self {
+        Self(sspi::network_client::reqwest_network_client::ReqwestNetworkClient)
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl AsyncNetworkClient for SspiDefaultNetworkClient {
+    fn send(&self, network_request: NetworkRequest) -> BoxFuture<'_, anyhow::Result<Vec<u8>>> {
+        let self_clone = self.clone();
+        Box::pin(async move {
+            tracing::debug!("Sending network request: {:?}", network_request);
+            let res = tokio::task::spawn_blocking(move || {
+                sspi::network_client::NetworkClient::send(&self_clone.0, &network_request)
+            })
+            .await
+            .with_context(|| "tokio::task::spawn_blocking failed")?
+            .with_context(|| "sspi::network_client::NetworkClient::send failed")?;
+            Ok(res)
+        })
     }
 }
 
@@ -55,6 +93,10 @@ pub enum SecurityProviderError {
     IoError(std::io::Error),
     #[error("Buffer not large enough,expected {0}")]
     BufferNotLargeEnough(u32),
+    #[error("Should never happen error {0}")]
+    Unreachable(String),
+    #[error("unexpected error {0}")]
+    Other(String),
 }
 
 impl From<sspi::Error> for SecurityProviderError {

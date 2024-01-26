@@ -147,7 +147,7 @@ impl LdapParser {
     /*
     oid is the attributeSyntax from schema
     om_syntax is the oMSyntax from schema
-    a combination of these two identifies a attibute syntax
+    a combination of these two identifies a attribute syntax
      */
     pub fn parse_with_syntax_value(
         oid: String,

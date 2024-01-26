@@ -284,7 +284,7 @@ pub enum LdapResultCode {
     // 37 - 47
     InappropriateAuthentication = 48,
     InvalidCredentials = 49,
-    InsufficentAccessRights = 50,
+    InsufficientAccessRights = 50,
     Busy = 51,
     Unavailable = 52,
     UnwillingToPerform = 53,
@@ -332,7 +332,7 @@ sync_state_enum_convert!(
     AliasDereferencingProblem,
     InappropriateAuthentication,
     InvalidCredentials,
-    InsufficentAccessRights,
+    InsufficientAccessRights,
     Busy,
     Unavailable,
     UnwillingToPerform,

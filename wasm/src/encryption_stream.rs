@@ -5,25 +5,7 @@ use std::{
 
 use tokio::io::ReadBuf;
 
-use crate::authentication::{SecurityProvider, SecurityProviderError};
-
-pub struct DummyEncryptionProvider;
-impl SecurityProvider for DummyEncryptionProvider {
-    fn step<'a>(
-        &'a mut self,
-        _input: &'a [u8],
-    ) -> futures_util::future::LocalBoxFuture<'a, crate::authentication::StepResult> {
-        unreachable!()
-    }
-
-    fn encrypt(&mut self, input: Vec<u8>) -> Result<Vec<u8>, SecurityProviderError> {
-        Ok(input)
-    }
-
-    fn decrypt(&mut self, input: Vec<u8>) -> Result<Vec<u8>, SecurityProviderError> {
-        Ok(input)
-    }
-}
+use crate::authentication::{DummySecurityProvider, SecurityProvider, SecurityProviderError};
 
 pub struct EncryptionStream<T> {
     inner: T,
@@ -36,7 +18,7 @@ impl<T> EncryptionStream<T> {
     pub fn new(inner: T) -> Self {
         Self {
             inner,
-            encryption: Box::new(DummyEncryptionProvider),
+            encryption: Box::new(DummySecurityProvider),
             inner_read_buf: Vec::new(),
             decryption_buf: Vec::new(),
         }
@@ -56,36 +38,16 @@ where
         cx: &mut Context<'_>,
         buf: &mut ReadBuf<'_>,
     ) -> Poll<std::io::Result<()>> {
-
-        if self.decryption_buf.len() > 0 {
-            tracing::info!(
-                "decryption buf has data len = {} , return it first",
-                self.decryption_buf.len()
-            );
-            if self.decryption_buf.len() <= buf.remaining() {
-                tracing::info!(
-                    "decryption buf is smaller than buf, return decryption buf, buf len = {}",
-                    buf.remaining()
-                );
-                buf.put_slice(&self.decryption_buf[..]);
-                self.decryption_buf.clear();
-            } else {
-                tracing::info!("decryption buf is larger than buf, return buf and save the rest to decryption buf, buf len = {}", buf.remaining());
-                let left = self.decryption_buf[buf.remaining()..].to_vec();
-                buf.put_slice(&self.decryption_buf[..buf.remaining()]);
-                self.decryption_buf.clear();
-                self.decryption_buf.extend_from_slice(&left);
-            }
-            tracing::debug!(
-                "read into buf, buf len = {}, there is {} left in the decryption buf",
-                buf.filled().len(),
-                self.decryption_buf.len()
-            );
+        if !self.decryption_buf.is_empty() {
+            tracing::trace!("The decryption buffer is not empty, reading from it. buf.remaining = {}, decryption buffer = {}", buf.remaining(), self.decryption_buf.len());
+            let data_to_read = std::cmp::min(self.decryption_buf.len(), buf.remaining());
+            buf.put_slice(&self.decryption_buf[..data_to_read]);
+            self.decryption_buf.drain(..data_to_read);
             return Poll::Ready(Ok(()));
         }
 
         // read from inner stream
-        let mut inner_read_buf = [0u8; 8096];
+        let mut inner_read_buf = [0u8; 1024];
         let mut local_read_buf = ReadBuf::new(&mut inner_read_buf);
         match Pin::new(&mut self.inner).poll_read(cx, &mut local_read_buf) {
             Poll::Ready(res) => {
@@ -96,18 +58,14 @@ where
             Poll::Pending => return Poll::Pending,
         };
 
-        tracing::debug!(
-            "read from inner stream, size = {}",
-            local_read_buf.filled().len()
-        );
-
-        if local_read_buf.filled().len() == 0 {
-            return Poll::Ready(Ok(()));
+        if local_read_buf.filled().is_empty() {
+            return Poll::Ready(Ok(())); // EOF
         }
+
         // decrypt
         self.inner_read_buf
-            .extend_from_slice(&local_read_buf.filled());
-        let to_decrypt = self.inner_read_buf.clone();
+            .extend_from_slice(local_read_buf.filled());
+        let to_decrypt = &self.inner_read_buf.clone();
         let decrypted_payload = match self.encryption.decrypt(to_decrypt) {
             Ok(payload) => {
                 self.inner_read_buf.clear();
@@ -115,39 +73,36 @@ where
             }
             Err(e) => {
                 return Poll::Ready(match e {
-                    SecurityProviderError::SspiError(e) => Err(std::io::Error::new(
-                        std::io::ErrorKind::Other,
-                        e.to_string(),
-                    )),
-                    SecurityProviderError::IoError(e) => Err(e),
-                    SecurityProviderError::BufferNotLargeEnough(size) => {
-                        tracing::debug!("buffer not large enough, size = {}, read again", size);
+                    SecurityProviderError::BufferNotLargeEnough(_) => {
                         cx.waker().wake_by_ref();
                         return Poll::Pending;
                     }
+                    SecurityProviderError::IoError(e) => Err(e),
+
+                    SecurityProviderError::SspiError(e) => {
+                        Err(std::io::Error::new(std::io::ErrorKind::Other, e))
+                    }
+                    _ => Err(std::io::Error::new(std::io::ErrorKind::Other, e)),
                 })
             }
         };
+
         // if decrypted payload is larger than buf, return buf
         if decrypted_payload.len() > buf.remaining() {
             tracing::debug!("Decrypted payload is larger than buf, return buf and save the rest to decryption buf");
-        
+
             let space_in_buf = buf.remaining();
             buf.put_slice(&decrypted_payload[..space_in_buf]);
-        
             let left_over = decrypted_payload[space_in_buf..].to_vec();
             self.decryption_buf.clear();
             self.decryption_buf.extend_from_slice(&left_over);
-        
-            tracing::debug!("Read into buf, buf len = {}, there is {} left in the decryption buf and decrypted_payload.len() = {}", 
-                            buf.filled().len(), 
-                            self.decryption_buf.len(),
-                            decrypted_payload.len());
         } else {
-            tracing::debug!("Decrypted payload is smaller than or equal to buf, return decrypted payload");
+            tracing::trace!(
+                "Decrypted payload is smaller than or equal to buf, return decrypted payload"
+            );
             buf.put_slice(&decrypted_payload);
         }
-        
+
         Poll::Ready(Ok(()))
     }
 }
@@ -161,7 +116,7 @@ where
         cx: &mut std::task::Context<'_>,
         buf: &[u8],
     ) -> std::task::Poll<std::io::Result<usize>> {
-        let encrypted_payload = match self.encryption.encrypt(buf.to_vec()) {
+        let encrypted_payload = match self.encryption.encrypt(buf) {
             Ok(payload) => payload,
             Err(e) => {
                 return Poll::Ready(Err(std::io::Error::new(
@@ -171,7 +126,7 @@ where
             }
         };
 
-        tracing::debug!(
+        tracing::trace!(
             "encrypted poll write payload,size = {:?},original size = {:?}",
             encrypted_payload.len(),
             buf.len()
@@ -191,7 +146,6 @@ where
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<std::io::Result<()>> {
-        tracing::debug!("poll flush");
         Pin::new(&mut self.inner).poll_flush(cx)
     }
 
@@ -199,7 +153,6 @@ where
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<std::io::Result<()>> {
-        tracing::debug!("poll shutdown");
         Pin::new(&mut self.inner).poll_shutdown(cx)
     }
 }

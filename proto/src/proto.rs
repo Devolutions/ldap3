@@ -109,7 +109,7 @@ pub enum LdapResultCode {
     // 37 - 47
     InappropriateAuthentication = 48,
     InvalidCredentials = 49,
-    InsufficentAccessRights = 50,
+    InsufficientAccessRights = 50,
     Busy = 51,
     Unavailable = 52,
     UnwillingToPerform = 53,
@@ -3176,7 +3176,7 @@ impl TryFrom<i64> for LdapResultCode {
             36 => Ok(LdapResultCode::AliasDereferencingProblem),
             48 => Ok(LdapResultCode::InappropriateAuthentication),
             49 => Ok(LdapResultCode::InvalidCredentials),
-            50 => Ok(LdapResultCode::InsufficentAccessRights),
+            50 => Ok(LdapResultCode::InsufficientAccessRights),
             51 => Ok(LdapResultCode::Busy),
             52 => Ok(LdapResultCode::Unavailable),
             53 => Ok(LdapResultCode::UnwillingToPerform),

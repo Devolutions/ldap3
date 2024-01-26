@@ -25,12 +25,18 @@ impl From<JsErrorValue> for JsValue {
 
 impl<T> From<T> for JsErrorValue
 where
-    T: std::error::Error,
+    T: std::fmt::Display,
 {
     fn from(error: T) -> Self {
         JsErrorValue::new(error.to_string())
     }
 }
+
+// impl From<JsValue> for JsErrorValue {
+//     fn from(error: JsValue) -> Self {
+//         JsErrorValue::new(error)
+//     }
+// }
 
 impl JsErrorValue {
     pub fn new<T: fmt::Debug>(error: T) -> Self {
