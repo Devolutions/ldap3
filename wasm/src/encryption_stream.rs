@@ -56,6 +56,7 @@ where
         cx: &mut Context<'_>,
         buf: &mut ReadBuf<'_>,
     ) -> Poll<std::io::Result<()>> {
+
         if self.decryption_buf.len() > 0 {
             tracing::info!(
                 "decryption buf has data len = {} , return it first",
@@ -130,25 +131,23 @@ where
         // if decrypted payload is larger than buf, return buf
         if decrypted_payload.len() > buf.remaining() {
             tracing::debug!("Decrypted payload is larger than buf, return buf and save the rest to decryption buf");
-
+        
             let space_in_buf = buf.remaining();
             buf.put_slice(&decrypted_payload[..space_in_buf]);
-
+        
             let left_over = decrypted_payload[space_in_buf..].to_vec();
             self.decryption_buf.clear();
             self.decryption_buf.extend_from_slice(&left_over);
-
+        
             tracing::debug!("Read into buf, buf len = {}, there is {} left in the decryption buf and decrypted_payload.len() = {}", 
-                            buf.filled().len(),
+                            buf.filled().len(), 
                             self.decryption_buf.len(),
                             decrypted_payload.len());
         } else {
-            tracing::debug!(
-                "Decrypted payload is smaller than or equal to buf, return decrypted payload"
-            );
+            tracing::debug!("Decrypted payload is smaller than or equal to buf, return decrypted payload");
             buf.put_slice(&decrypted_payload);
         }
-
+        
         Poll::Ready(Ok(()))
     }
 }

@@ -46,14 +46,17 @@ pub struct LdapSession {
 #[wasm_bindgen]
 pub struct LdapSessionParameters {
     server_address_ws_proxy: String,
+    max_bytes_for_decoder: Option<u32>,
 }
 
 #[wasm_bindgen]
 impl LdapSessionParameters {
     #[wasm_bindgen(constructor)]
-    pub fn new(server_address_ws_proxy: String) -> Self {
+    /// max_bytes_for_decoder: the maximum number of bytes that the decoder can decode, if not specified, the default is 8KB
+    pub fn new(server_address_ws_proxy: String, max_bytes_for_decoder: Option<u32>) -> Self {
         Self {
             server_address_ws_proxy,
+            max_bytes_for_decoder,
         }
     }
 }
@@ -86,7 +89,13 @@ impl LdapSession {
         let io_stream = ws_stream_wasm.into_io();
         let io_stream = EncryptionStream::new(io_stream);
 
-        let framed = Framed::new(io_stream, LdapCodec::default());
+        let framed = Framed::new(
+            io_stream,
+            params
+                .max_bytes_for_decoder
+                .map(|m| LdapCodec::new(Some(m as usize)))
+                .unwrap_or_default(),
+        );
         let session = LdapSession {
             frame: Arc::new(Mutex::new(framed)),
             message_id: 0,
@@ -380,7 +389,19 @@ impl LdapSession {
             match bind_response.res.code {
                 LdapResultCode::Success => {
                     tracing::trace!("bind success");
-                    frame.get_mut().set_encryption(auth_provider);
+
+                    if !sign.unwrap_or(false) && seal.is_some_and(|s| s) {
+                        // break error saying that sign without seal is not supported
+                        break Err(to_js_error!(
+                            "sign without seal is not supported, please set seal to true"
+                        ));
+                    }
+
+                    if seal.unwrap_or(false) {
+                        tracing::trace!("setting encryption");
+                        frame.get_mut().set_encryption(auth_provider);
+                    }
+
                     break Ok(serde_wasm_bindgen::to_value(&bind_response)?);
                 }
                 LdapResultCode::SaslBindInProgress => {
