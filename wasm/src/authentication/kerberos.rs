@@ -1,39 +1,90 @@
+use anyhow::Context;
 use futures_util::future::LocalBoxFuture;
 use sspi::{
-    builders::EmptyInitializeSecurityContext, AuthIdentity, ClientRequestFlags, CredentialUse,
-    DataRepresentation, EncryptionFlags, Kerberos, KerberosConfig, SecurityBuffer,
+    builders::EmptyInitializeSecurityContext, detect_kdc_url, AuthIdentity, ClientRequestFlags,
+    CredentialUse, DataRepresentation, EncryptionFlags, Kerberos, KerberosConfig, SecurityBuffer,
     SecurityBufferType, SecurityStatus, Sspi, SspiImpl, Username,
 };
 use tracing::debug;
 
-use super::{SecurityProvider, StepResult, WasmNetworkClient, SecurityProviderError};
+use super::{AsyncNetworkClient, SecurityProvider, SecurityProviderError, StepResult};
+
 pub struct KerberoAuthProvier {
     kerbero: Kerberos,
     credentials_handle: <Kerberos as SspiImpl>::CredentialsHandle,
     server_computer_name: String,
     sign: Option<bool>,
     seal: Option<bool>,
+    client: Box<dyn AsyncNetworkClient>,
     sequence_number: u32,
+    recv_sequence_number: u32,
+    context_status: Option<SecurityStatus>,
+}
+
+#[derive(typed_builder::TypedBuilder)]
+pub struct KerberoInitParams<'a> {
+    pub ldap_username: &'a str,
+    pub ldap_password: &'a str,
+    pub domain: Option<&'a str>,
+    pub kdc_proxy_url: Option<&'a str>,
+    pub client_computer_name: &'a str,
+    pub server_computer_name: &'a str,
+    pub sign: Option<bool>,
+    pub seal: Option<bool>,
+    pub client: Option<Box<dyn AsyncNetworkClient>>,
+}
+
+impl<'a> TryFrom<KerberoInitParams<'a>> for KerberoAuthProvier {
+    type Error = anyhow::Error;
+    fn try_from(value: KerberoInitParams) -> Result<KerberoAuthProvier, anyhow::Error> {
+        KerberoAuthProvier::new(value)
+    }
 }
 
 impl KerberoAuthProvier {
-    // new func, takes username and password, domian ,kdc_proxy_url and returns Self
-    pub(crate) fn new(
-        ldap_username: &str,
-        ldap_password: &str,
-        domain: &str,
-        kdc_proxy_url: &str,
-        client_computer_name: &str,
-        server_computer_name: &str,
-        sign: Option<bool>,
-        seal: Option<bool>,
-    ) -> Self {
+    pub(crate) fn new(params: KerberoInitParams) -> anyhow::Result<Self> {
+        let KerberoInitParams {
+            ldap_username,
+            ldap_password,
+            domain,
+            kdc_proxy_url,
+            client_computer_name,
+            server_computer_name,
+            sign,
+            seal,
+            client,
+        } = params;
+
+        let username = match Username::parse(ldap_username) {
+            Ok(username) => username,
+            Err(_) => Username::new(ldap_username, domain)
+                .with_context(|| format!("Failed to parse username: {}", ldap_username))?,
+        };
+
+        let clone = username.clone();
+        let domain = match domain {
+            Some(d) => d,
+            None => clone
+                .domain_name()
+                .with_context(|| format!("Failed to parse domain: {}", ldap_username))?,
+        };
+
         let identity = AuthIdentity {
-            username: Username::new(ldap_username, Some(domain)).unwrap(),
+            username,
             password: ldap_password.to_string().into(),
         };
 
-        let kerb_config = KerberosConfig::new(kdc_proxy_url, client_computer_name.to_string());
+        let url = match kdc_proxy_url {
+            Some(k) => k.to_string(),
+            None => {
+                let url = detect_kdc_url(domain).ok_or(anyhow::anyhow!(
+                    "Failed to detect KDC URL for domain: {}",
+                    domain
+                ))?;
+                url.to_string()
+            }
+        };
+        let kerb_config = KerberosConfig::new(&url, client_computer_name.to_string());
 
         let mut kerbero = Kerberos::new_client_from_config(kerb_config).unwrap();
 
@@ -44,18 +95,32 @@ impl KerberoAuthProvier {
             .execute()
             .unwrap();
 
-        Self {
+        let client = client.unwrap();
+
+        let res = Self {
             kerbero,
             credentials_handle: acq_cred_result.credentials_handle,
             server_computer_name: server_computer_name.to_string(),
             sign,
             seal,
+            client,
             sequence_number: 0,
-        }
+            recv_sequence_number: 0,
+            context_status: None,
+        };
+
+        Ok(res)
     }
+
     fn next_sequence_number(&mut self) -> u32 {
         let res = self.sequence_number;
         self.sequence_number += 1;
+        res
+    }
+
+    fn next_recv_sequence_number(&mut self) -> u32 {
+        let res = self.recv_sequence_number;
+        self.recv_sequence_number += 1;
         res
     }
 }
@@ -92,14 +157,13 @@ impl SecurityProvider for KerberoAuthProvier {
                     .with_output(&mut output_buffer);
 
             let result = {
-                let clinet = WasmNetworkClient;
                 let mut generator = self.kerbero.initialize_security_context_impl(&mut builder);
                 let mut state = generator.start();
 
                 loop {
                     match state {
                         sspi::generator::GeneratorState::Suspended(req) => {
-                            let res = clinet.send(&req).await;
+                            let res = self.client.send(req).await?;
                             state = generator.resume(Ok(res));
                         }
                         sspi::generator::GeneratorState::Completed(v) => break v,
@@ -121,19 +185,56 @@ impl SecurityProvider for KerberoAuthProvier {
         })
     }
 
-    fn encrypt(&mut self, input: Vec<u8>) -> Result<Vec<u8>, SecurityProviderError> {
-        let mut msg_buffer = vec![SecurityBuffer::new(input, SecurityBufferType::Stream)];
-
+    fn encrypt(&mut self, input: &[u8]) -> Result<Vec<u8>, super::SecurityProviderError> {
+        let mut msg_buffer = vec![
+            SecurityBuffer::new(Vec::new(), SecurityBufferType::Token),
+            SecurityBuffer::new(input.to_vec(), SecurityBufferType::Data),
+            SecurityBuffer::new(Vec::new(), SecurityBufferType::Padding),
+        ];
         let seq = self.next_sequence_number();
         self.kerbero
             .encrypt_message(EncryptionFlags::empty(), &mut msg_buffer, seq)?;
-        Ok(msg_buffer[0].buffer.clone())
+
+        let mut output = Vec::new();
+        let length = msg_buffer[0].buffer.len() as u32
+            + msg_buffer[1].buffer.len() as u32
+            + msg_buffer[2].buffer.len() as u32;
+        let length_bytes = length.to_be_bytes();
+        output.extend_from_slice(&length_bytes);
+        output.extend_from_slice(&msg_buffer[0].buffer);
+        output.extend_from_slice(&msg_buffer[1].buffer);
+        output.extend_from_slice(&msg_buffer[2].buffer);
+        Ok(output)
     }
 
-    fn decrypt(&mut self, input: Vec<u8>) -> Result<Vec<u8>, SecurityProviderError> {
-        let mut msg_buffer = vec![SecurityBuffer::new(input, SecurityBufferType::Stream)];
-        let seq = self.next_sequence_number();
+    fn decrypt(&mut self, input: &[u8]) -> Result<Vec<u8>, super::SecurityProviderError> {
+        if (input.len() as u32) < 4 {
+            return Err(SecurityProviderError::BufferNotLargeEnough(4));
+        }
+        let length = u32::from_be_bytes([input[0], input[1], input[2], input[3]]);
+
+        if length != input.len() as u32 - 4 {
+            return Err(SecurityProviderError::BufferNotLargeEnough(length + 4));
+        }
+
+        let rest = input[4..].to_vec();
+        let mut msg_buffer = vec![
+            SecurityBuffer::new(rest[..60].to_vec(), SecurityBufferType::Token),
+            SecurityBuffer::new(rest[60..].to_vec(), SecurityBufferType::Data),
+        ];
+
+        let seq = self.next_recv_sequence_number();
+
         self.kerbero.decrypt_message(&mut msg_buffer, seq)?;
-        Ok(msg_buffer[0].buffer.clone())
+
+        let SecurityBuffer { buffer: data, .. } = msg_buffer.pop().ok_or(
+            SecurityProviderError::Unreachable("missing data buffer".to_string()),
+        )?;
+
+        Ok(data)
+    }
+
+    fn status(&self) -> Option<sspi::SecurityStatus> {
+        self.context_status
     }
 }

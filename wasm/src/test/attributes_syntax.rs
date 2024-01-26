@@ -1,14 +1,14 @@
 // use wasm_bindgen::JsValue;
 // use wasm_bindgen_test::{console_log, wasm_bindgen_test};
 
-// use crate::schema::{attribute_schema::LdapSyntax, displayables::AttibuteValue};
+// use crate::schema::{attribute_schema::LdapSyntax, displayables::AttributeValue};
 
 // #[wasm_bindgen_test]
-// pub fn test_parse_larg_integer() {
+// pub fn test_parse_large_integer() {
 //     let bytes = vec![vec![0, 0, 0, 0, 0, 0, 0, 0], vec![0, 0, 0, 0, 0, 0, 0, 1]];
 //     let big_integer = LdapSyntax::LargeInteger;
 
-//     let attribute_value = AttibuteValue::Bytes(bytes);
+//     let attribute_value = AttributeValue::Bytes(bytes);
 
 //     let mut res = LdapSyntax::parse(
 //         big_integer.oid().to_string(),
@@ -28,7 +28,7 @@
 //     let bytes = vec!["20231031183842.0Z".as_bytes().to_vec()];
 //     let generalized_time = LdapSyntax::StringGeneralizedTime;
 
-//     let attribute_value = AttibuteValue::Bytes(bytes);
+//     let attribute_value = AttributeValue::Bytes(bytes);
 
 //     let mut res = LdapSyntax::parse(
 //         generalized_time.oid().to_string(),
