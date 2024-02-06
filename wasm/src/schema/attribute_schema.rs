@@ -177,7 +177,6 @@ impl LdapParser {
         let bytes_arr = attribute_value.into();
         match syntax {
             LdapSyntax::StringUnicode
-            | LdapSyntax::StringSid
             | LdapSyntax::StringCase
             | LdapSyntax::StringIa5
             | LdapSyntax::StringNtSecDesc
@@ -195,6 +194,7 @@ impl LdapParser {
             | LdapSyntax::LargeInteger // so is this
             | LdapSyntax::Enumeration
             => LdapSyntax::bytes_arr_as_js_strings(bytes_arr),
+            LdapSyntax::StringSid => LdapSyntax::bytes_arr_as_sid(bytes_arr),
             LdapSyntax::StringGeneralizedTime => LdapSyntax::bytes_arr_as_js_date_generialized_time(bytes_arr),
             LdapSyntax::StringUtcTime => LdapSyntax::bytes_arr_to_date_utc(bytes_arr),
             LdapSyntax::StringOctet | LdapSyntax::ObjectDnBinary => LdapSyntax::bytes_arr_as_js_uint8arr(bytes_arr),
@@ -239,6 +239,15 @@ impl LdapSyntax {
             })
             .collect::<Vec<_>>();
         Ok(uint8arr)
+    }
+
+    fn bytes_arr_as_sid(bytes_arr: Vec<Vec<u8>>) -> Result<Vec<JsValue>> {
+        let strings :Result<Vec<_>,_>= bytes_arr
+            .into_iter()
+            .map(|v| decode_sid(&v).ok_or(anyhow::anyhow!("Invalid SID")))
+            .map(|string| string.map(|v| JsValue::from_str(v.as_str())))
+            .collect();
+        strings
     }
 
     fn bytes_arr_as_js_date_generialized_time(bytes_arr: Vec<Vec<u8>>) -> Result<Vec<JsValue>> {
@@ -370,4 +379,48 @@ impl From<Vec<bool>> for JsBooleans {
     fn from(value: Vec<bool>) -> Self {
         JsBooleans(value)
     }
+}
+
+fn decode_sid(sid: &[u8]) -> Option<String> {
+    if sid.len() < 8 {
+        return None;
+    }
+
+    let mut s = String::from("S-");
+
+    // get version
+    let revision = sid[0];
+    s.push_str(&revision.to_string());
+
+    // next byte is the count of sub-authorities
+    let count_sub_auths = sid[1] as usize;
+
+    // get the authority
+    let authority = (sid[2] as u64) << 40
+        | (sid[3] as u64) << 32
+        | (sid[4] as u64) << 24
+        | (sid[5] as u64) << 16
+        | (sid[6] as u64) << 8
+        | sid[7] as u64;
+
+    s.push('-');
+    s.push_str(&authority.to_string());
+
+    // check for the length of the sid with sub authorities
+    if sid.len() < 8 + count_sub_auths * 4 {
+        return None;
+    }
+
+    for i in 0..count_sub_auths {
+        let offset = 8 + i * 4;
+        let sub_authority = (sid[offset] as u32)
+            | (sid[offset + 1] as u32) << 8
+            | (sid[offset + 2] as u32) << 16
+            | (sid[offset + 3] as u32) << 24;
+
+        s.push('-');
+        s.push_str(&sub_authority.to_string());
+    }
+
+    Some(s)
 }
