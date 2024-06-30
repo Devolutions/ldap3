@@ -93,7 +93,7 @@ impl From<LdapSearchResultEntry> for SearchEntry {
 #[derive(Debug, Serialize, Deserialize, Tsify)]
 #[tsify(into_wasm_abi, from_wasm_abi)]
 #[serde(rename_all = "snake_case")]
-pub enum SearchOperation {
+pub enum SearchResultOperation {
     SearchEntry(SearchEntry),
     SearchReference(LdapSearchResultReference),
     SearchDone(LdapResult),
@@ -104,7 +104,7 @@ pub enum SearchOperation {
 #[tsify(into_wasm_abi, from_wasm_abi)]
 pub struct SearchMessage {
     pub msgid: i32,
-    pub op: SearchOperation,
+    pub op: SearchResultOperation,
     pub ctrl: Option<LdapControlArray>,
 }
 
@@ -115,17 +115,17 @@ impl TryFrom<ldap3_proto::proto::LdapMsg> for SearchMessage {
         match value.op {
             proto::LdapOp::SearchResultEntry(entry) => Ok(SearchMessage {
                 msgid: value.msgid,
-                op: SearchOperation::SearchEntry(entry.into()),
+                op: SearchResultOperation::SearchEntry(entry.into()),
                 ctrl: Some(value.ctrl.into()),
             }),
             proto::LdapOp::SearchResultReference(result) => Ok(SearchMessage {
                 msgid: value.msgid,
-                op: SearchOperation::SearchReference(result),
+                op: SearchResultOperation::SearchReference(result),
                 ctrl: Some(value.ctrl.into()),
             }),
             proto::LdapOp::SearchResultDone(result) => Ok(SearchMessage {
                 msgid: value.msgid,
-                op: SearchOperation::SearchDone(result),
+                op: SearchResultOperation::SearchDone(result),
                 ctrl: Some(value.ctrl.into()),
             }),
             _ => anyhow::bail!("not a search message"),
