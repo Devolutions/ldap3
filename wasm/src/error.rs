@@ -32,12 +32,6 @@ where
     }
 }
 
-// impl From<JsValue> for JsErrorValue {
-//     fn from(error: JsValue) -> Self {
-//         JsErrorValue::new(error)
-//     }
-// }
-
 impl JsErrorValue {
     pub fn new<T: fmt::Debug>(error: T) -> Self {
         Self {

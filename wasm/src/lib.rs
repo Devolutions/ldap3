@@ -8,7 +8,7 @@ pub mod encryption_stream;
 pub mod error;
 pub mod ldap_session;
 pub mod schema;
-pub mod search;
+// pub mod search;
 #[cfg(test)]
 mod test;
 pub mod types;

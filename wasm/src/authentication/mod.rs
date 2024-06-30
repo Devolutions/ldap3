@@ -1,7 +1,5 @@
-
-
 use anyhow::Context;
-use futures_util::future::{LocalBoxFuture};
+use futures_util::future::LocalBoxFuture;
 
 use sspi::generator::NetworkRequest;
 

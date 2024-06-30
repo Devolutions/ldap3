@@ -1,7 +1,11 @@
 #![allow(non_snake_case)]
-use ldap3_proto::{proto::LdapResult, LdapPartialAttribute, LdapSearchResultEntry};
+use ldap3_proto::{
+    proto::{self, LdapResult, LdapSearchResultReference},
+    LdapPartialAttribute, LdapSearchResultEntry,
+};
 use serde::{Deserialize, Serialize};
 use tsify::Tsify;
+use wasm_bindgen::JsValue;
 
 use super::control::LdapControlArray;
 
@@ -91,7 +95,7 @@ impl From<LdapSearchResultEntry> for SearchEntry {
 #[serde(rename_all = "snake_case")]
 pub enum SearchOperation {
     SearchEntry(SearchEntry),
-    SearchReference(LdapResult),
+    SearchReference(LdapSearchResultReference),
     SearchDone(LdapResult),
 }
 
@@ -102,4 +106,53 @@ pub struct SearchMessage {
     pub msgid: i32,
     pub op: SearchOperation,
     pub ctrl: Option<LdapControlArray>,
+}
+
+impl TryFrom<ldap3_proto::proto::LdapMsg> for SearchMessage {
+    type Error = anyhow::Error;
+
+    fn try_from(value: ldap3_proto::proto::LdapMsg) -> Result<Self, Self::Error> {
+        match value.op {
+            proto::LdapOp::SearchResultEntry(entry) => Ok(SearchMessage {
+                msgid: value.msgid,
+                op: SearchOperation::SearchEntry(entry.into()),
+                ctrl: Some(value.ctrl.into()),
+            }),
+            proto::LdapOp::SearchResultReference(result) => Ok(SearchMessage {
+                msgid: value.msgid,
+                op: SearchOperation::SearchReference(result),
+                ctrl: Some(value.ctrl.into()),
+            }),
+            proto::LdapOp::SearchResultDone(result) => Ok(SearchMessage {
+                msgid: value.msgid,
+                op: SearchOperation::SearchDone(result),
+                ctrl: Some(value.ctrl.into()),
+            }),
+            _ => anyhow::bail!("not a search message"),
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
+pub struct SearchParameters {
+    pub search_base: String,
+    pub filter: String,
+    pub scope: crate::ldap_session::JsLdapSearchScope,
+    pub attributes: Vec<String>,
+    pub size_limit: Option<i32>,
+    pub time_limit: Option<i32>,
+    pub controls: Option<LdapControlArray>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
+pub struct SearchMessages {
+    pub messages: Vec<SearchMessage>,
+}
+
+impl From<SearchMessages> for JsValue {
+    fn from(val: SearchMessages) -> Self {
+        serde_wasm_bindgen::to_value(&val).unwrap()
+    }
 }

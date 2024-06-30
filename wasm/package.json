@@ -1,6 +1,6 @@
 {
   "name": "@devolutions/ldap-wasm-js",
-  "version": "0.2.16",
+  "version": "0.3.0",
   "description": "a ldap packages exposes RUST LDAP3 to Javascript in Browser",
   "email": "jou@devolutions.net",
   "main": "./dist/ldap-wasm-js.js",
@@ -32,5 +32,8 @@
     "vite": "^4.5.0",
     "vite-plugin-dts": "^3.6.3",
     "vite-plugin-wasm": "^3.2.2"
+  },
+  "publishConfig": {
+    "registry": "https://devolutions.jfrog.io/devolutions/api/npm/npm-local/"
   }
 }

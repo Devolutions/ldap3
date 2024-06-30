@@ -242,7 +242,7 @@ impl LdapSyntax {
     }
 
     fn bytes_arr_as_sid(bytes_arr: Vec<Vec<u8>>) -> Result<Vec<JsValue>> {
-        let strings :Result<Vec<_>,_>= bytes_arr
+        let strings: Result<Vec<_>, _> = bytes_arr
             .into_iter()
             .map(|v| decode_sid(&v).ok_or(anyhow::anyhow!("Invalid SID")))
             .map(|string| string.map(|v| JsValue::from_str(v.as_str())))

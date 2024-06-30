@@ -3,15 +3,16 @@ use std::{
     task::{Context, Poll},
 };
 
-use tokio::io::ReadBuf;
-
 use crate::authentication::{DummySecurityProvider, SecurityProvider, SecurityProviderError};
+use tokio::io::ReadBuf;
+use tracing::{debug, instrument};
 
 pub struct EncryptionStream<T> {
     inner: T,
     encryption: Box<dyn SecurityProvider>,
     inner_read_buf: Vec<u8>,
     decryption_buf: Vec<u8>,
+    bytes_need: Option<u32>,
 }
 
 impl<T> EncryptionStream<T> {
@@ -21,6 +22,7 @@ impl<T> EncryptionStream<T> {
             encryption: Box::new(DummySecurityProvider),
             inner_read_buf: Vec::new(),
             decryption_buf: Vec::new(),
+            bytes_need: None,
         }
     }
 
@@ -33,6 +35,7 @@ impl<T> tokio::io::AsyncRead for EncryptionStream<T>
 where
     T: tokio::io::AsyncRead + Unpin,
 {
+    #[instrument(skip(self, cx, buf))]
     fn poll_read(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
@@ -47,7 +50,7 @@ where
         }
 
         // read from inner stream
-        let mut inner_read_buf = [0u8; 1024];
+        let mut inner_read_buf = [0u8; 8096];
         let mut local_read_buf = ReadBuf::new(&mut inner_read_buf);
         match Pin::new(&mut self.inner).poll_read(cx, &mut local_read_buf) {
             Poll::Ready(res) => {
@@ -62,19 +65,23 @@ where
             return Poll::Ready(Ok(())); // EOF
         }
 
-        // decrypt
+        debug!("start decrypting");
+
         self.inner_read_buf
             .extend_from_slice(local_read_buf.filled());
         let to_decrypt = &self.inner_read_buf.clone();
+
         let decrypted_payload = match self.encryption.decrypt(to_decrypt) {
             Ok(payload) => {
                 self.inner_read_buf.clear();
+                self.bytes_need = None;
                 payload
             }
             Err(e) => {
                 return Poll::Ready(match e {
-                    SecurityProviderError::BufferNotLargeEnough(_) => {
+                    SecurityProviderError::BufferNotLargeEnough(bytes_need) => {
                         cx.waker().wake_by_ref();
+                        self.bytes_need = Some(bytes_need);
                         return Poll::Pending;
                     }
                     SecurityProviderError::IoError(e) => Err(e),
@@ -89,7 +96,7 @@ where
 
         // if decrypted payload is larger than buf, return buf
         if decrypted_payload.len() > buf.remaining() {
-            tracing::debug!("Decrypted payload is larger than buf, return buf and save the rest to decryption buf");
+            tracing::debug!("Decrypted payload len = {}, is larger than input buf remaining len = {}, return buf and save the rest to decryption buf", decrypted_payload.len(), buf.remaining());
 
             let space_in_buf = buf.remaining();
             buf.put_slice(&decrypted_payload[..space_in_buf]);

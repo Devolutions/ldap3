@@ -7,11 +7,4 @@ export type Uuid = string; // Assuming Uuid is a string
     type LdapSearchResultReference = {
         uris: string[];
     };
-
-    type LdapResult = {
-        code: LdapResultCode;
-        matcheddn: string;
-        message: string;
-        referral: string[];
-    };
 "#;

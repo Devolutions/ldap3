@@ -12,13 +12,3 @@ macro_rules! send_message {
     .map_err(|e| to_js_error!("Error receiving response : {:?}", e))?
     .map_err(|e| to_js_error!("Error receiving response : {:?}", e))?};
 }
-
-#[macro_export]
-macro_rules! return_msg_if_type_matches {
-    ($enum:path,$res:expr) => {
-        match $res.op {
-            $enum(_) => Ok(serde_wasm_bindgen::to_value(&$res)?),
-            _ => Err(to_js_error!("Invalid response")),
-        }
-    };
-}

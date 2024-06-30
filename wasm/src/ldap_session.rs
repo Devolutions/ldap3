@@ -2,12 +2,19 @@
 // this is because Tsify and wasm-bindgen generates name in PascalCase, will look for solution later
 use crate::{
     authentication::{
-        kerberos::{KerberoAuthProvier, KerberoInitParams}, negotiate::NegotiateAuthProvier, ntlm::NtlmAuthProvier, SecurityProvider, WasmNetworkClient
+        kerberos::{KerberoAuthProvier, KerberoInitParams},
+        negotiate::NegotiateAuthProvier,
+        ntlm::NtlmAuthProvier,
+        SecurityProvider, WasmNetworkClient,
     },
-    dto::control::LdapControlArray,
+    dto::{
+        control::LdapControlArray,
+        operation::LdapBindResponse,
+        result::LdapResult,
+        search::{SearchMessages, SearchParameters},
+    },
     encryption_stream::EncryptionStream,
     error::JsErrorValue,
-    search::LdapSearchStreamBuilder,
 };
 use async_io_stream::IoStream;
 use futures_util::sink::SinkExt;
@@ -33,7 +40,7 @@ use tsify::Tsify;
 use wasm_bindgen::prelude::*;
 use ws_stream_wasm::WsStreamIo;
 
-use crate::{dto::modify::ModifyRequest, return_msg_if_type_matches, send_message};
+use crate::{dto::modify::ModifyRequest, send_message};
 use crate::{to_js_error, JsResult};
 
 pub(crate) type LdapFrame = Framed<EncryptionStream<IoStream<WsStreamIo, Vec<u8>>>, LdapCodec>;
@@ -97,38 +104,71 @@ impl LdapSession {
                 .unwrap_or_default(),
         );
         let session = LdapSession {
+            #[allow(clippy::arc_with_non_send_sync)]
             frame: Arc::new(Mutex::new(framed)),
             message_id: 0,
         };
         Ok(session)
     }
 
-    #[allow(clippy::too_many_arguments)]
-    pub fn search(
+    // Counterintuitively, the search method that returns result in bulk is faster and more performant than return result one by one through a callback
+    // Invoking Javascript function from Rust is slow, and if there's always message in the queue, it will be a blocking call until the queue is empty
+    pub async fn search(
         &mut self,
-        search_base: String,
-        filter: String,
-        scope: JsLdapSearchScope,
-        attributes: Vec<String>,
-        size_limit: Option<i32>,
-        time_limit: Option<i32>,
-        controls: Option<LdapControlArray>,
-    ) -> JsResult<crate::search::LdapSearchResultStream> {
+        SearchParameters {
+            search_base,
+            filter,
+            scope,
+            attributes,
+            size_limit,
+            time_limit,
+            controls,
+        }: SearchParameters,
+    ) -> JsResult<SearchMessages> {
         let filter =
             parse_ldap_filter_str(&filter).map_err(|e| to_js_error!("Invalid filter : {:?}", e))?;
-        trace!(?filter, ?attributes, ?controls);
-        let builder = LdapSearchStreamBuilder::default()
-            .frame(self.frame.clone())
-            .search_base(search_base)
-            .filter(filter)
-            .scope(scope)
-            .size_limit(size_limit)
-            .time_limit(time_limit)
-            .message_id(self.next_message_id())
-            .attributes(attributes)
-            .controls(controls.unwrap_or_default().into());
 
-        builder.build()
+        trace!(?filter, ?attributes, ?controls);
+
+        let request = ldap3_proto::proto::LdapSearchRequest {
+            base: search_base,
+            filter,
+            scope: scope.into(),
+            attrs: attributes,
+            aliases: ldap3_proto::proto::LdapDerefAliases::Never,
+            sizelimit: size_limit.unwrap_or(1000),
+            timelimit: time_limit.unwrap_or(10),
+            typesonly: false,
+        };
+
+        let msg = LdapMsg {
+            msgid: self.next_message_id(),
+            op: LdapOp::SearchRequest(request),
+            ctrl: controls.unwrap_or_default().into(),
+        };
+
+        let mut frame = self.frame.lock().await;
+
+        frame.send(msg).await?;
+
+        let mut messages = Vec::new();
+
+        loop {
+            let msg = frame
+                .next()
+                .await
+                .ok_or(to_js_error!("Unable to get search response"))??;
+
+            let should_stop = matches!(msg.op, LdapOp::SearchResultDone(_));
+
+            messages.push(msg.try_into()?);
+
+            if should_stop {
+                break;
+            };
+        }
+
+        Ok(SearchMessages { messages })
     }
 
     pub async fn add(
@@ -136,7 +176,7 @@ impl LdapSession {
         dn: String,
         attributes: crate::dto::search::AttributesArray,
         controls: Option<LdapControlArray>,
-    ) -> JsResult<JsValue> {
+    ) -> JsResult<LdapResult> {
         let request = LdapAddRequest {
             dn,
             attributes: attributes.into(),
@@ -150,14 +190,17 @@ impl LdapSession {
 
         let res = send_message!(self, msg);
 
-        return_msg_if_type_matches!(LdapOp::AddResponse, res)
+        match res.op {
+            LdapOp::AddResponse(res) => Ok(res.into()),
+            _ => Err(to_js_error!("Invalid response")),
+        }
     }
 
     pub async fn delete(
         &mut self,
         dn: String,
         controls: Option<LdapControlArray>,
-    ) -> JsResult<JsValue> {
+    ) -> JsResult<LdapResult> {
         let msg = LdapMsg {
             msgid: self.next_message_id(),
             op: LdapOp::DelRequest(dn),
@@ -166,7 +209,10 @@ impl LdapSession {
 
         let res = send_message!(self, msg);
 
-        return_msg_if_type_matches!(LdapOp::DelResponse, res)
+        match res.op {
+            LdapOp::DelResponse(res) => Ok(res.into()),
+            _ => Err(to_js_error!("Invalid response")),
+        }
     }
 
     pub async fn modify_dn(
@@ -176,7 +222,7 @@ impl LdapSession {
         delete_old_rdn: bool,
         new_superior: Option<String>,
         controls: Option<LdapControlArray>,
-    ) -> JsResult<JsValue> {
+    ) -> JsResult<LdapResult> {
         let msg = LdapMsg {
             msgid: self.next_message_id(),
             op: LdapOp::ModifyDNRequest(ldap3_proto::proto::LdapModifyDNRequest {
@@ -190,7 +236,10 @@ impl LdapSession {
 
         let result = send_message!(self, msg);
 
-        return_msg_if_type_matches!(LdapOp::ModifyDNResponse, result)
+        match result.op {
+            LdapOp::ModifyDNResponse(res) => Ok(res.into()),
+            _ => Err(to_js_error!("Invalid response")),
+        }
     }
 
     /// modify is of type LdapModify[]
@@ -199,7 +248,7 @@ impl LdapSession {
         dn: String,
         modifies: crate::dto::modify::BinaryLdapModifies,
         controls: Option<LdapControlArray>,
-    ) -> JsResult<JsValue> {
+    ) -> JsResult<LdapResult> {
         let deserialized_modify: Vec<ModifyRequest> = modifies.into();
 
         let op = LdapOp::ModifyRequest(LdapModifyRequest {
@@ -220,7 +269,10 @@ impl LdapSession {
         };
 
         let result = send_message!(self, msg);
-        return_msg_if_type_matches!(LdapOp::ModifyResponse, result)
+        match result.op {
+            LdapOp::ModifyResponse(res) => Ok(res.into()),
+            _ => Err(to_js_error!("Invalid response")),
+        }
     }
 
     pub async fn compare(
@@ -229,7 +281,7 @@ impl LdapSession {
         attribute: String,
         value: String,
         controls: Option<LdapControlArray>,
-    ) -> JsResult<JsValue> {
+    ) -> JsResult<LdapResult> {
         let msg = LdapMsg {
             msgid: self.next_message_id(),
             op: LdapOp::CompareRequest(ldap3_proto::proto::LdapCompareRequest {
@@ -241,7 +293,11 @@ impl LdapSession {
         };
 
         let result = send_message!(self, msg);
-        return_msg_if_type_matches!(LdapOp::CompareResult, result)
+
+        match result.op {
+            LdapOp::CompareResult(res) => Ok(res.into()),
+            _ => Err(to_js_error!("Invalid response")),
+        }
     }
 }
 
@@ -263,7 +319,7 @@ impl LdapSession {
         distinguished_name: String,
         password: String,
         controls: Option<LdapControlArray>,
-    ) -> JsResult<JsValue> {
+    ) -> JsResult<LdapBindResponse> {
         let msg = LdapMsg {
             msgid: self.next_message_id(),
             op: LdapOp::BindRequest(LdapBindRequest {
@@ -276,9 +332,7 @@ impl LdapSession {
         let res = send_message!(self, msg);
         match &res.op {
             LdapOp::BindResponse(bind_response) => match &bind_response.res.code {
-                ldap3_proto::proto::LdapResultCode::Success => {
-                    Ok(serde_wasm_bindgen::to_value(&res)?)
-                }
+                ldap3_proto::proto::LdapResultCode::Success => Ok(bind_response.clone().into()),
                 _ => Err(to_js_error!("Bind failed : {:?}", bind_response)),
             },
             _ => Err(to_js_error!("Invalid response")),
@@ -301,7 +355,7 @@ impl LdapSession {
         Ok(())
     }
 
-    pub async fn sasl_bind(&mut self, config: SaslBindConfig) -> JsResult<JsValue> {
+    pub async fn sasl_bind(&mut self, config: SaslBindConfig) -> JsResult<LdapBindResponse> {
         let SaslBindConfig {
             username,
             password,
@@ -410,8 +464,7 @@ impl LdapSession {
                         frame.get_mut().set_encryption(auth_provider);
                     }
 
-                    break Ok(serde_wasm_bindgen::to_value(&bind_response)
-                        .expect("unable to serialize bind response"));
+                    break Ok(bind_response.into());
                 }
                 LdapResultCode::SaslBindInProgress => {
                     if let Some(ref cred) = bind_response.saslcreds {
@@ -447,7 +500,8 @@ impl LdapSession {
 
 //================================================================================================
 
-#[wasm_bindgen]
+#[derive(Debug, Tsify, Serialize, Deserialize)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 pub enum JsLdapSearchScope {
     Base = 0,
     OneLevel = 1,
