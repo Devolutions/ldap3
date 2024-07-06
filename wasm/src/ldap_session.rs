@@ -20,7 +20,7 @@ use async_io_stream::IoStream;
 use futures_util::sink::SinkExt;
 use futures_util::StreamExt;
 
-use std::sync::Arc;
+use std::sync::{atomic::AtomicI32, Arc};
 
 use ldap3_proto::{
     parse_ldap_filter_str,
@@ -47,7 +47,7 @@ pub(crate) type LdapFrame = Framed<EncryptionStream<IoStream<WsStreamIo, Vec<u8>
 #[wasm_bindgen]
 pub struct LdapSession {
     frame: Arc<Mutex<LdapFrame>>,
-    message_id: i32,
+    message_id: AtomicI32,
 }
 
 #[wasm_bindgen]
@@ -68,9 +68,10 @@ impl LdapSessionParameters {
     }
 }
 impl LdapSession {
-    fn next_message_id(&mut self) -> i32 {
-        self.message_id += 1;
+    fn next_message_id(&self) -> i32 {
         self.message_id
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.message_id.load(std::sync::atomic::Ordering::SeqCst)
     }
 }
 
@@ -106,7 +107,7 @@ impl LdapSession {
         let session = LdapSession {
             #[allow(clippy::arc_with_non_send_sync)]
             frame: Arc::new(Mutex::new(framed)),
-            message_id: 0,
+            message_id: AtomicI32::new(0),
         };
         Ok(session)
     }
@@ -114,7 +115,7 @@ impl LdapSession {
     // Counterintuitively, the search method that returns result in bulk is faster and more performant than return result one by one through a callback
     // Invoking Javascript function from Rust is slow, and if there's always message in the queue, it will be a blocking call until the queue is empty
     pub async fn search(
-        &mut self,
+        &self,
         SearchParameters {
             search_base,
             filter,
@@ -172,7 +173,7 @@ impl LdapSession {
     }
 
     pub async fn add(
-        &mut self,
+        &self,
         dn: String,
         attributes: crate::dto::search::AttributesArray,
         controls: Option<LdapControlArray>,
@@ -197,7 +198,7 @@ impl LdapSession {
     }
 
     pub async fn delete(
-        &mut self,
+        &self,
         dn: String,
         controls: Option<LdapControlArray>,
     ) -> JsResult<LdapResult> {
@@ -216,7 +217,7 @@ impl LdapSession {
     }
 
     pub async fn modify_dn(
-        &mut self,
+        &self,
         dn: String,
         newrdn: String,
         delete_old_rdn: bool,
@@ -244,7 +245,7 @@ impl LdapSession {
 
     /// modify is of type LdapModify[]
     pub async fn modify(
-        &mut self,
+        &self,
         dn: String,
         modifies: crate::dto::modify::BinaryLdapModifies,
         controls: Option<LdapControlArray>,
@@ -276,7 +277,7 @@ impl LdapSession {
     }
 
     pub async fn compare(
-        &mut self,
+        &self,
         dn: String,
         attribute: String,
         value: String,
