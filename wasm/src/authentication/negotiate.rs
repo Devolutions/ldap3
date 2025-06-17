@@ -3,7 +3,7 @@ use futures_util::future::LocalBoxFuture;
 use sspi::{
     builders::EmptyInitializeSecurityContext, ntlm::NtlmConfig, AuthIdentity, ClientRequestFlags,
     CredentialUse, DataRepresentation, EncryptionFlags, KerberosConfig, Negotiate, NegotiateConfig,
-    SecurityBuffer, SecurityBufferType, SecurityStatus, Sspi, SspiImpl, Username,
+    SecurityBuffer, SecurityBufferRef, SecurityStatus, Sspi, SspiImpl, Username, BufferType,
 };
 use tracing::debug;
 
@@ -78,7 +78,7 @@ impl NegotiateAuthProvier {
             .acquire_credentials_handle()
             .with_credential_use(CredentialUse::Outbound)
             .with_auth_data(&identity.into())
-            .execute()
+            .execute(&mut negotiate)
             .unwrap();
 
         let client = client.unwrap();
@@ -115,11 +115,11 @@ impl SecurityProvider for NegotiateAuthProvier {
     fn step<'a>(&'a mut self, input: &'a [u8]) -> LocalBoxFuture<'a, StepResult> {
         Box::pin(async move {
             let mut output_buffer =
-                vec![SecurityBuffer::new(Vec::new(), SecurityBufferType::Token)];
+                vec![SecurityBuffer::new(Vec::new(), BufferType::Token)];
 
             let mut input_buffer = vec![SecurityBuffer::new(
                 input.to_vec().clone(),
-                SecurityBufferType::Token,
+                BufferType::Token,
             )];
             let target_name = format!("LDAP/{}", self.server_computer_name);
 
@@ -134,7 +134,7 @@ impl SecurityProvider for NegotiateAuthProvier {
             }
 
             let mut builder =
-                EmptyInitializeSecurityContext::<<Negotiate as SspiImpl>::CredentialsHandle>::new()
+                EmptyInitializeSecurityContext::<<Negotiate as SspiImpl>::CredentialsHandle>::default()
                     .with_credentials_handle(&mut self.credentials_handle)
                     .with_context_requirements(flag)
                     .with_target_data_representation(DataRepresentation::Native)
@@ -145,7 +145,7 @@ impl SecurityProvider for NegotiateAuthProvier {
             let result = {
                 let mut generator = self
                     .negotiate
-                    .initialize_security_context_impl(&mut builder);
+                    .initialize_security_context_impl(&mut builder)?;
                 let mut state = generator.start();
 
                 loop {
@@ -175,24 +175,27 @@ impl SecurityProvider for NegotiateAuthProvier {
     }
 
     fn encrypt(&mut self, input: &[u8]) -> Result<Vec<u8>, super::SecurityProviderError> {
+        let mut input = input.to_vec();
+
         let mut msg_buffer = vec![
-            SecurityBuffer::new(Vec::new(), SecurityBufferType::Token),
-            SecurityBuffer::new(input.to_vec(), SecurityBufferType::Data),
-            SecurityBuffer::new(Vec::new(), SecurityBufferType::Padding),
+            SecurityBufferRef::token_buf(&mut []),
+            SecurityBufferRef::data_buf(&mut input),
+            SecurityBufferRef::padding_buf(&mut []),
         ];
         let seq = self.next_sequence_number();
         self.negotiate
             .encrypt_message(EncryptionFlags::empty(), &mut msg_buffer, seq)?;
 
         let mut output = Vec::new();
-        let length = msg_buffer[0].buffer.len() as u32
-            + msg_buffer[1].buffer.len() as u32
-            + msg_buffer[2].buffer.len() as u32;
+        let length = msg_buffer[0].buf_len() as u32
+            + msg_buffer[1].buf_len() as u32
+            + msg_buffer[2].buf_len() as u32;
         let length_bytes = length.to_be_bytes();
         output.extend_from_slice(&length_bytes);
-        output.extend_from_slice(&msg_buffer[0].buffer);
-        output.extend_from_slice(&msg_buffer[1].buffer);
-        output.extend_from_slice(&msg_buffer[2].buffer);
+        output.extend_from_slice(msg_buffer[0].data());
+        output.extend_from_slice(msg_buffer[1].data());
+        output.extend_from_slice(msg_buffer[2].data());
+
         Ok(output)
     }
 
@@ -214,21 +217,21 @@ impl SecurityProvider for NegotiateAuthProvier {
                 ))
             }
         };
-        let rest = input[4..].to_vec();
+
+        let rest = &input[4..];
+        let mut token_buf = rest[..token_size].to_vec();
+        let mut data_buf = rest[token_size..].to_vec();
+
         let mut msg_buffer = vec![
-            SecurityBuffer::new(rest[..token_size].to_vec(), SecurityBufferType::Token),
-            SecurityBuffer::new(rest[token_size..].to_vec(), SecurityBufferType::Data),
+            SecurityBufferRef::token_buf(&mut token_buf),
+            SecurityBufferRef::data_buf(&mut data_buf),
         ];
 
         let seq = self.next_recv_sequence_number();
 
         self.negotiate.decrypt_message(&mut msg_buffer, seq)?;
 
-        let SecurityBuffer { buffer: data, .. } = msg_buffer.pop().ok_or(
-            SecurityProviderError::Unreachable("missing data buffer".to_string()),
-        )?;
-
-        Ok(data)
+        Ok(data_buf)
     }
 
     fn status(&self) -> Option<sspi::SecurityStatus> {
