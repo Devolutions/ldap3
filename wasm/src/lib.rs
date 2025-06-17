@@ -1,6 +1,11 @@
 use error::JsErrorValue;
 use tracing::Level;
 use wasm_bindgen::prelude::wasm_bindgen;
+use std::sync::OnceLock;
+use tracing_subscriber::Registry;
+use tracing_subscriber::layer::SubscriberExt as _;
+use tracing_subscriber::reload;
+use wasm_tracing::{ConsoleConfig, WasmLayerConfig, WasmLayer};
 
 pub mod authentication;
 pub mod dto;
@@ -38,13 +43,12 @@ macro_rules! call_js_function_serde {
 #[wasm_bindgen(start)]
 pub fn start() {
     console_error_panic_hook::set_once();
+    init_or_update_logger(Level::WARN);
 }
 
 #[wasm_bindgen]
 pub fn set_logging_level(level: LoggingLevel) {
-    let mut builder = tracing_wasm::WASMLayerConfigBuilder::new();
-    builder.set_max_level(level.into());
-    tracing_wasm::set_as_global_default_with_config(builder.build());
+    init_or_update_logger(Level::from(level));
 }
 
 #[wasm_bindgen]
@@ -70,4 +74,26 @@ impl From<LoggingLevel> for Level {
 
 pub struct JsFunction {
     pub callback: js_sys::Function,
+}
+
+fn init_or_update_logger(level: Level) {
+    static LOG_FILTER_HANDLE: OnceLock<reload::Handle<WasmLayer, Registry>> = OnceLock::new();
+
+    let reload_handle = LOG_FILTER_HANDLE.get_or_init(move || {
+        let wasm_layer = build_wasm_layer(level);
+        let (reload_layer, reload_handle) = reload::Layer::new(wasm_layer);
+
+        let _ = tracing::subscriber::set_global_default(Registry::default().with(reload_layer));
+
+        reload_handle
+    });
+
+    let _ = reload_handle.reload(build_wasm_layer(level));
+
+    fn build_wasm_layer(level: Level) -> WasmLayer {
+        let mut config = WasmLayerConfig::new();
+        config.set_console_config(ConsoleConfig::ReportWithConsoleColor)
+            .set_max_level(level);
+        WasmLayer::new(config)
+    }
 }
