@@ -121,21 +121,17 @@ impl SecurityProvider for NtlmAuthProvier {
         let mut msg_buffer = vec![
             SecurityBufferRef::token_buf(&mut token),
             SecurityBufferRef::data_buf(&mut input),
-            SecurityBufferRef::padding_buf(&mut []),
         ];
         let seq = self.next_sequence_number();
         self.ntlm
             .encrypt_message(EncryptionFlags::empty(), &mut msg_buffer, seq)?;
 
         let mut output = Vec::new();
-        let length = msg_buffer[0].buf_len() as u32
-            + msg_buffer[1].buf_len() as u32
-            + msg_buffer[2].buf_len() as u32;
+        let length = msg_buffer[0].buf_len() as u32 + msg_buffer[1].buf_len() as u32;
         let length_bytes = length.to_be_bytes();
         output.extend_from_slice(&length_bytes);
         output.extend_from_slice(msg_buffer[0].data());
         output.extend_from_slice(msg_buffer[1].data());
-        output.extend_from_slice(msg_buffer[2].data());
         Ok(output)
     }
 
