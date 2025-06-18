@@ -1,8 +1,8 @@
 use futures_util::future::LocalBoxFuture;
 use sspi::{
-    builders::EmptyInitializeSecurityContext, AuthIdentity, ClientRequestFlags, CredentialUse,
-    DataRepresentation, EncryptionFlags, Ntlm, SecurityBuffer, SecurityStatus,
-    Sspi, SspiImpl, Username, BufferType, SecurityBufferRef,
+    builders::EmptyInitializeSecurityContext, AuthIdentity, BufferType, ClientRequestFlags,
+    CredentialUse, DataRepresentation, EncryptionFlags, Ntlm, SecurityBuffer, SecurityBufferRef,
+    SecurityStatus, Sspi, SspiImpl, Username,
 };
 
 use super::{SecurityProvider, SecurityProviderError, StepResult};
@@ -65,8 +65,7 @@ impl NtlmAuthProvier {
 impl SecurityProvider for NtlmAuthProvier {
     fn step<'a>(&'a mut self, input: &'a [u8]) -> LocalBoxFuture<'a, StepResult> {
         Box::pin(async move {
-            let mut output_buffer =
-                vec![SecurityBuffer::new(Vec::new(), BufferType::Token)];
+            let mut output_buffer = vec![SecurityBuffer::new(Vec::new(), BufferType::Token)];
 
             let mut input_buffer = vec![SecurityBuffer::new(
                 input.to_vec().clone(),
@@ -116,8 +115,11 @@ impl SecurityProvider for NtlmAuthProvier {
     fn encrypt(&mut self, input: &[u8]) -> Result<Vec<u8>, SecurityProviderError> {
         let mut input = input.to_vec();
 
+        let security_trailer_len = self.ntlm.query_context_sizes()?.security_trailer as usize;
+        let mut token = vec![0; security_trailer_len];
+
         let mut msg_buffer = vec![
-            SecurityBufferRef::token_buf(&mut []),
+            SecurityBufferRef::token_buf(&mut token),
             SecurityBufferRef::data_buf(&mut input),
             SecurityBufferRef::padding_buf(&mut []),
         ];
