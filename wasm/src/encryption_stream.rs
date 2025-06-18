@@ -86,10 +86,8 @@ where
                     }
                     SecurityProviderError::Io(e) => Err(e),
 
-                    SecurityProviderError::Sspi(e) => {
-                        Err(std::io::Error::new(std::io::ErrorKind::Other, e))
-                    }
-                    _ => Err(std::io::Error::new(std::io::ErrorKind::Other, e)),
+                    SecurityProviderError::Sspi(e) => Err(std::io::Error::other(e)),
+                    _ => Err(std::io::Error::other(e)),
                 })
             }
         };
@@ -125,12 +123,7 @@ where
     ) -> std::task::Poll<std::io::Result<usize>> {
         let encrypted_payload = match self.encryption.encrypt(buf) {
             Ok(payload) => payload,
-            Err(e) => {
-                return Poll::Ready(Err(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    e.to_string(),
-                )))
-            }
+            Err(e) => return Poll::Ready(Err(std::io::Error::other(e.to_string()))),
         };
 
         tracing::trace!(
