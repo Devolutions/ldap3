@@ -10,46 +10,50 @@ pub struct JsErrorValue {
     pub error: String,
 }
 
-#[macro_export]
-macro_rules! to_js_error {
-    ($($arg:tt)*) => {
-        JsErrorValue::new(format!($($arg)*).as_str())
-    };
-}
-
 impl From<JsErrorValue> for JsValue {
     fn from(val: JsErrorValue) -> Self {
         val.to_js_value()
     }
 }
 
-impl<T> From<T> for JsErrorValue
+impl<E> From<E> for JsErrorValue
 where
-    T: std::fmt::Display,
+    E: std::error::Error + Send + Sync + 'static,
 {
-    fn from(error: T) -> Self {
-        JsErrorValue::new(error.to_string())
+    fn from(error: E) -> Self {
+        JsErrorValue::new(error)
     }
 }
 
 impl JsErrorValue {
-    pub fn new<T: fmt::Debug>(error: T) -> Self {
+    pub fn new<E: std::error::Error + Send + Sync + 'static>(error: E) -> Self {
         Self {
-            error: format!("{:?}", error),
+            error: format!("{:#}", anyhow::Error::new(error)),
         }
     }
 
-    pub fn new_with_message<T: fmt::Debug>(message: &str, error: T) -> Self {
+    pub fn new_with_context<E: std::error::Error + Send + Sync + 'static>(
+        message: &str,
+        error: E,
+    ) -> Self {
         Self {
-            error: format!("{}: {:?}", message, error),
+            error: format!("{message}: {:#}", anyhow::Error::new(error)),
+        }
+    }
+
+    pub fn msg<M: fmt::Display>(message: M) -> Self {
+        Self {
+            error: message.to_string(),
+        }
+    }
+
+    pub fn from_anyhow(error: anyhow::Error) -> Self {
+        Self {
+            error: format!("{error:#}"),
         }
     }
 
     pub fn to_js_value(&self) -> JsValue {
-        let res = serde_wasm_bindgen::to_value(self);
-        match res {
-            Ok(js_value) => js_value,
-            Err(_error) => JsValue::from_str("error serializing errors, this should never happen"),
-        }
+        serde_wasm_bindgen::to_value(self).expect("should never happen")
     }
 }

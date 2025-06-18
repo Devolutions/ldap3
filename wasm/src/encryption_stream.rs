@@ -84,9 +84,9 @@ where
                         self.bytes_need = Some(bytes_need);
                         return Poll::Pending;
                     }
-                    SecurityProviderError::IoError(e) => Err(e),
+                    SecurityProviderError::Io(e) => Err(e),
 
-                    SecurityProviderError::SspiError(e) => {
+                    SecurityProviderError::Sspi(e) => {
                         Err(std::io::Error::new(std::io::ErrorKind::Other, e))
                     }
                     _ => Err(std::io::Error::new(std::io::ErrorKind::Other, e)),

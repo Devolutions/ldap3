@@ -9,7 +9,7 @@ use tsify::Tsify;
 
 use crate::dto::search::AttributeValue;
 use crate::error::JsErrorValue;
-use crate::{to_js_error, JsResult};
+use crate::JsResult;
 use enum_assoc::Assoc;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Assoc, Tsify)]
@@ -157,17 +157,15 @@ impl LdapParser {
         let syntax = LdapSyntax::from_oid_to_vec(&oid)
             .into_iter()
             .find(|v| v.om_syntax() == om_syntax)
-            .ok_or(to_js_error!("No syntax found"))?;
-        LdapParser::to_displayable_impl(syntax, attribute_value)
-            .map_err(|e| to_js_error!("{:?}", e))
+            .ok_or_else(|| JsErrorValue::msg("no syntax found"))?;
+        LdapParser::to_displayable_impl(syntax, attribute_value).map_err(JsErrorValue::from_anyhow)
     }
 
     pub fn parse_value(
         syntax: LdapSyntax,
         attribute_value: AttributeValue,
     ) -> JsResult<Vec<JsValue>> {
-        LdapParser::to_displayable_impl(syntax, attribute_value)
-            .map_err(|e| to_js_error!("{:?}", e))
+        LdapParser::to_displayable_impl(syntax, attribute_value).map_err(JsErrorValue::from_anyhow)
     }
 
     fn to_displayable_impl(
@@ -331,7 +329,7 @@ impl LdapParser {
             .into_iter()
             .map(|v| String::from_utf8(v).map_err(|e| anyhow::anyhow!("{:?}", e)))
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| to_js_error!("{:?}", e))?;
+            .map_err(JsErrorValue::from_anyhow)?;
         Ok(strings)
     }
 
@@ -341,12 +339,12 @@ impl LdapParser {
             .into_iter()
             .map(|v| String::from_utf8(v).map_err(|e| anyhow::anyhow!("{:?}", e)))
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| to_js_error!("{:?}", e))?;
+            .map_err(JsErrorValue::from_anyhow)?;
         let dates = strings
             .into_iter()
             .map(LdapSyntax::string_to_js_date_generialized_time)
             .collect::<Result<Vec<_>>>()
-            .map_err(|e| to_js_error!("{:?}", e))?;
+            .map_err(JsErrorValue::from_anyhow)?;
         Ok(dates)
     }
 
@@ -363,7 +361,7 @@ impl LdapParser {
         let bytes_arr: Vec<Vec<u8>> = attribute_value.into();
         let res = bytes_arr
             .into_iter()
-            .map(|v| String::from_utf8(v).map_err(|_| to_js_error!("Invalid UTF-8 bytes")))
+            .map(|v| String::from_utf8(v).map_err(JsErrorValue::new))
             .map(|v| Ok(v? == "TRUE"))
             .collect::<Result<Vec<_>, JsErrorValue>>()?;
 

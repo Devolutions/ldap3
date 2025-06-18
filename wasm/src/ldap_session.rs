@@ -16,6 +16,7 @@ use crate::{
     encryption_stream::EncryptionStream,
     error::JsErrorValue,
 };
+use anyhow::Context as _;
 use async_io_stream::IoStream;
 use futures_util::sink::SinkExt;
 use futures_util::StreamExt;
@@ -40,8 +41,8 @@ use tsify::Tsify;
 use wasm_bindgen::prelude::*;
 use ws_stream_wasm::WsStreamIo;
 
+use crate::JsResult;
 use crate::{dto::modify::ModifyRequest, send_message};
-use crate::{to_js_error, JsResult};
 
 pub(crate) type LdapFrame = Framed<EncryptionStream<IoStream<WsStreamIo, Vec<u8>>>, LdapCodec>;
 #[wasm_bindgen]
@@ -93,7 +94,7 @@ impl LdapSession {
         let (_ws_meta, ws_stream_wasm) =
             ws_stream_wasm::WsMeta::connect(&params.server_address_ws_proxy, None)
                 .await
-                .map_err(|e| to_js_error!("Failed to connect to server : {:?}", e))?;
+                .map_err(|e| JsErrorValue::new_with_context("failed to connect to server", e))?;
         let io_stream = ws_stream_wasm.into_io();
         let io_stream = EncryptionStream::new(io_stream);
 
@@ -126,8 +127,8 @@ impl LdapSession {
             controls,
         }: SearchParameters,
     ) -> JsResult<SearchMessages> {
-        let filter =
-            parse_ldap_filter_str(&filter).map_err(|e| to_js_error!("Invalid filter : {:?}", e))?;
+        let filter = parse_ldap_filter_str(&filter)
+            .map_err(|e| JsErrorValue::new_with_context("invalid filter", e))?;
 
         trace!(?filter, ?attributes, ?controls);
 
@@ -158,11 +159,13 @@ impl LdapSession {
             let msg = frame
                 .next()
                 .await
-                .ok_or(to_js_error!("Unable to get search response"))??;
+                .ok_or_else(|| JsErrorValue::msg("unable to get search response"))??;
 
             let should_stop = matches!(msg.op, LdapOp::SearchResultDone(_));
 
-            messages.push(msg.try_into()?);
+            let message = msg.try_into().map_err(JsErrorValue::from_anyhow)?;
+
+            messages.push(message);
 
             if should_stop {
                 break;
@@ -193,7 +196,7 @@ impl LdapSession {
 
         match res.op {
             LdapOp::AddResponse(res) => Ok(res.into()),
-            _ => Err(to_js_error!("Invalid response")),
+            _ => Err(JsErrorValue::msg("invalid response")),
         }
     }
 
@@ -212,7 +215,7 @@ impl LdapSession {
 
         match res.op {
             LdapOp::DelResponse(res) => Ok(res.into()),
-            _ => Err(to_js_error!("Invalid response")),
+            _ => Err(JsErrorValue::msg("invalid response")),
         }
     }
 
@@ -239,7 +242,7 @@ impl LdapSession {
 
         match result.op {
             LdapOp::ModifyDNResponse(res) => Ok(res.into()),
-            _ => Err(to_js_error!("Invalid response")),
+            _ => Err(JsErrorValue::msg("invalid response")),
         }
     }
 
@@ -257,7 +260,8 @@ impl LdapSession {
                 .into_iter()
                 .map(|m| {
                     m.try_into()
-                        .map_err(|e| to_js_error!("Invalid modify : {:?}", e))
+                        .context("invalid modify")
+                        .map_err(JsErrorValue::from_anyhow)
                 })
                 .collect::<Result<Vec<LdapModify>, _>>()?,
             dn,
@@ -272,7 +276,7 @@ impl LdapSession {
         let result = send_message!(self, msg);
         match result.op {
             LdapOp::ModifyResponse(res) => Ok(res.into()),
-            _ => Err(to_js_error!("Invalid response")),
+            _ => Err(JsErrorValue::msg("invalid response")),
         }
     }
 
@@ -297,7 +301,7 @@ impl LdapSession {
 
         match result.op {
             LdapOp::CompareResult(res) => Ok(res.into()),
-            _ => Err(to_js_error!("Invalid response")),
+            _ => Err(JsErrorValue::msg("invalid response")),
         }
     }
 }
@@ -334,9 +338,9 @@ impl LdapSession {
         match &res.op {
             LdapOp::BindResponse(bind_response) => match &bind_response.res.code {
                 ldap3_proto::proto::LdapResultCode::Success => Ok(bind_response.clone().into()),
-                _ => Err(to_js_error!("Bind failed : {:?}", bind_response)),
+                _ => Err(JsErrorValue::msg(format!("bind failed: {bind_response:?}"))),
             },
-            _ => Err(to_js_error!("Invalid response")),
+            _ => Err(JsErrorValue::msg("invalid response")),
         }
     }
 
@@ -352,7 +356,7 @@ impl LdapSession {
             .await
             .send(msg)
             .await
-            .map_err(|e| to_js_error!("Unable to send unbind request -> {:?}", e))?;
+            .map_err(|e| JsErrorValue::new_with_context("unable to send unbind request", e))?;
         Ok(())
     }
 
@@ -371,7 +375,8 @@ impl LdapSession {
                 server_computer_name,
             } => {
                 let res =
-                    NtlmAuthProvier::new(&username, &password, &server_computer_name, sign, seal)?;
+                    NtlmAuthProvier::new(&username, &password, &server_computer_name, sign, seal)
+                        .map_err(JsErrorValue::from_anyhow)?;
                 Box::new(res)
             }
             SspiAuthMethod::Kerberos {
@@ -390,7 +395,8 @@ impl LdapSession {
                     .seal(seal)
                     .client(Some(Box::new(WasmNetworkClient)))
                     .build();
-                let kerberos = KerberoAuthProvier::try_from(builder)?;
+                let kerberos =
+                    KerberoAuthProvier::try_from(builder).map_err(JsErrorValue::from_anyhow)?;
                 Box::new(kerberos)
             }
             SspiAuthMethod::Negotiate {
@@ -409,7 +415,8 @@ impl LdapSession {
                     .seal(seal)
                     .client(Some(Box::new(WasmNetworkClient)))
                     .build();
-                let negotiate = NegotiateAuthProvier::try_from(builder)?;
+                let negotiate =
+                    NegotiateAuthProvier::try_from(builder).map_err(JsErrorValue::from_anyhow)?;
                 Box::new(negotiate)
             }
         };
@@ -434,19 +441,21 @@ impl LdapSession {
         frame
             .send(msg)
             .await
-            .map_err(|e| to_js_error!("unable to send bind request: {:?}", e))?;
+            .map_err(|e| JsErrorValue::new_with_context("unable to send bind request", e))?;
 
         loop {
             let msg = frame
                 .next()
                 .await
-                .ok_or(to_js_error!("Unable to get bind response"))?
-                .map_err(|e| to_js_error!("Unable to get bind response: {:?}", e))?;
+                .ok_or_else(|| JsErrorValue::msg("unable to get bind response"))?
+                .map_err(|e| JsErrorValue::new_with_context("unable to get bind response", e))?;
 
             let bind_response = if let LdapOp::BindResponse(bind_response) = msg.op {
                 bind_response
             } else {
-                break Err(to_js_error!("Invalid response type,expected BindResponse"));
+                break Err(JsErrorValue::msg(
+                    "invalid response type,expected BindResponse",
+                ));
             };
 
             match bind_response.res.code {
@@ -455,8 +464,8 @@ impl LdapSession {
 
                     if !sign.unwrap_or(false) && seal.is_some_and(|s| s) {
                         // break error saying that sign without seal is not supported
-                        break Err(to_js_error!(
-                            "sign without seal is not supported, please set seal to true"
+                        break Err(JsErrorValue::msg(
+                            "sign without seal is not supported, please set seal to true",
                         ));
                     }
 
@@ -471,7 +480,10 @@ impl LdapSession {
                     if let Some(ref cred) = bind_response.saslcreds {
                         tracing::info!("sasl bind in progress");
                         let token = auth_provider.step(cred).await.map_err(|e| {
-                            to_js_error!("error in accepting incoming sasl token :{:?}", e)
+                            JsErrorValue::from_anyhow(
+                                anyhow::Error::from_boxed(e)
+                                    .context("error in accepting incoming sasl token"),
+                            )
                         })?;
                         let msg = LdapMsg {
                             msgid: self.next_message_id(),
@@ -488,11 +500,12 @@ impl LdapSession {
                         frame
                             .send(msg)
                             .await
-                            .map_err(|e| to_js_error!("unable to send bind request -> {:?}", e))?;
+                            .context("unable to send bind request")
+                            .map_err(JsErrorValue::from_anyhow)?;
                     }
                 }
                 _ => {
-                    break Err(to_js_error!("bind failed: {:?}", bind_response));
+                    break Err(JsErrorValue::msg(format!("bind failed: {bind_response:?}")));
                 }
             }
         }
