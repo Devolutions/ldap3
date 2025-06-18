@@ -11,7 +11,8 @@ pub mod ntlm;
 We are not seeking to implement GSSAPI encryption/decryption, at this time.
 We will use LDAP over TLS, instead.
 */
-pub type StepResult = Result<Vec<u8>, Box<dyn std::error::Error>>;
+pub type StepResult = Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync + 'static>>;
+
 pub trait SecurityProvider {
     // we are using wasm, so we dont need Send on the future, LocalBoxFuture is fine
     fn step<'a>(&'a mut self, input: &'a [u8]) -> LocalBoxFuture<'a, StepResult>;
@@ -78,26 +79,12 @@ impl AsyncNetworkClient for WasmNetworkClient {
 
 #[derive(Debug, thiserror::Error)]
 pub enum SecurityProviderError {
-    #[error("SSPI Error")]
-    SspiError(sspi::Error),
-    #[error("IO Error")]
-    IoError(std::io::Error),
-    #[error("Buffer not large enough,expected {0}")]
+    #[error("SSPI error")]
+    Sspi(#[from] sspi::Error),
+    #[error("IO error")]
+    Io(#[from] std::io::Error),
+    #[error("buffer not large enough, expected at least {0} bytes")]
     BufferNotLargeEnough(u32),
-    #[error("Should never happen error {0}")]
-    Unreachable(String),
-    #[error("unexpected error {0}")]
+    #[error("{0}")]
     Other(String),
-}
-
-impl From<sspi::Error> for SecurityProviderError {
-    fn from(value: sspi::Error) -> Self {
-        SecurityProviderError::SspiError(value)
-    }
-}
-
-impl From<std::io::Error> for SecurityProviderError {
-    fn from(value: std::io::Error) -> Self {
-        SecurityProviderError::IoError(value)
-    }
 }
