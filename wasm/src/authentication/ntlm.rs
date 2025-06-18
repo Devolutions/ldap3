@@ -115,24 +115,23 @@ impl SecurityProvider for NtlmAuthProvier {
     fn encrypt(&mut self, input: &[u8]) -> Result<Vec<u8>, SecurityProviderError> {
         let mut input = input.to_vec();
 
+        let security_trailer_len = self.ntlm.query_context_sizes()?.security_trailer as usize;
+        let mut token = vec![0; security_trailer_len];
+
         let mut msg_buffer = vec![
-            SecurityBufferRef::token_buf(&mut []),
+            SecurityBufferRef::token_buf(&mut token),
             SecurityBufferRef::data_buf(&mut input),
-            SecurityBufferRef::padding_buf(&mut []),
         ];
         let seq = self.next_sequence_number();
         self.ntlm
             .encrypt_message(EncryptionFlags::empty(), &mut msg_buffer, seq)?;
 
         let mut output = Vec::new();
-        let length = msg_buffer[0].buf_len() as u32
-            + msg_buffer[1].buf_len() as u32
-            + msg_buffer[2].buf_len() as u32;
+        let length = msg_buffer[0].buf_len() as u32 + msg_buffer[1].buf_len() as u32;
         let length_bytes = length.to_be_bytes();
         output.extend_from_slice(&length_bytes);
         output.extend_from_slice(msg_buffer[0].data());
         output.extend_from_slice(msg_buffer[1].data());
-        output.extend_from_slice(msg_buffer[2].data());
         Ok(output)
     }
 

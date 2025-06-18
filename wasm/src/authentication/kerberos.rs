@@ -1,9 +1,9 @@
 use anyhow::Context;
 use futures_util::future::LocalBoxFuture;
 use sspi::{
-    builders::EmptyInitializeSecurityContext, detect_kdc_url, AuthIdentity, ClientRequestFlags,
-    CredentialUse, DataRepresentation, EncryptionFlags, Kerberos, KerberosConfig, SecurityBuffer, SecurityBufferRef,
-    BufferType, SecurityStatus, Sspi, SspiImpl, Username,
+    builders::EmptyInitializeSecurityContext, detect_kdc_url, AuthIdentity, BufferType,
+    ClientRequestFlags, CredentialUse, DataRepresentation, EncryptionFlags, Kerberos,
+    KerberosConfig, SecurityBuffer, SecurityBufferRef, SecurityStatus, Sspi, SspiImpl, Username,
 };
 use tracing::debug;
 
@@ -130,8 +130,7 @@ impl KerberoAuthProvier {
 impl SecurityProvider for KerberoAuthProvier {
     fn step<'a>(&'a mut self, input: &'a [u8]) -> LocalBoxFuture<'a, StepResult> {
         Box::pin(async move {
-            let mut output_buffer =
-                vec![SecurityBuffer::new(Vec::new(), BufferType::Token)];
+            let mut output_buffer = vec![SecurityBuffer::new(Vec::new(), BufferType::Token)];
 
             let mut input_buffer = vec![SecurityBuffer::new(
                 input.to_vec().clone(),
@@ -149,17 +148,20 @@ impl SecurityProvider for KerberoAuthProvier {
                 flag |= ClientRequestFlags::CONFIDENTIALITY;
             }
 
-            let mut builder =
-                EmptyInitializeSecurityContext::<<Kerberos as SspiImpl>::CredentialsHandle>::default()
-                    .with_credentials_handle(&mut self.credentials_handle)
-                    .with_context_requirements(flag)
-                    .with_target_data_representation(DataRepresentation::Native)
-                    .with_target_name(&target_name)
-                    .with_input(&mut input_buffer)
-                    .with_output(&mut output_buffer);
+            let mut builder = EmptyInitializeSecurityContext::<
+                <Kerberos as SspiImpl>::CredentialsHandle,
+            >::default()
+            .with_credentials_handle(&mut self.credentials_handle)
+            .with_context_requirements(flag)
+            .with_target_data_representation(DataRepresentation::Native)
+            .with_target_name(&target_name)
+            .with_input(&mut input_buffer)
+            .with_output(&mut output_buffer);
 
             let result = {
-                let mut generator = self.kerbero.initialize_security_context_impl(&mut builder)?;
+                let mut generator = self
+                    .kerbero
+                    .initialize_security_context_impl(&mut builder)?;
                 let mut state = generator.start();
 
                 loop {
@@ -190,24 +192,23 @@ impl SecurityProvider for KerberoAuthProvier {
     fn encrypt(&mut self, input: &[u8]) -> Result<Vec<u8>, super::SecurityProviderError> {
         let mut input = input.to_vec();
 
+        let security_trailer_len = self.kerbero.query_context_sizes()?.security_trailer as usize;
+        let mut token = vec![0; security_trailer_len];
+
         let mut msg_buffer = vec![
-            SecurityBufferRef::token_buf(&mut []),
+            SecurityBufferRef::token_buf(&mut token),
             SecurityBufferRef::data_buf(&mut input),
-            SecurityBufferRef::padding_buf(&mut []),
         ];
         let seq = self.next_sequence_number();
         self.kerbero
             .encrypt_message(EncryptionFlags::empty(), &mut msg_buffer, seq)?;
 
         let mut output = Vec::new();
-        let length = msg_buffer[0].buf_len() as u32
-            + msg_buffer[1].buf_len() as u32
-            + msg_buffer[2].buf_len() as u32;
+        let length = msg_buffer[0].buf_len() as u32 + msg_buffer[1].buf_len() as u32;
         let length_bytes = length.to_be_bytes();
         output.extend_from_slice(&length_bytes);
         output.extend_from_slice(msg_buffer[0].data());
         output.extend_from_slice(msg_buffer[1].data());
-        output.extend_from_slice(msg_buffer[2].data());
 
         Ok(output)
     }
@@ -222,9 +223,11 @@ impl SecurityProvider for KerberoAuthProvier {
             return Err(SecurityProviderError::BufferNotLargeEnough(length + 4));
         }
 
+        let security_trailer_len = self.kerbero.query_context_sizes()?.security_trailer as usize;
+
         let rest = &input[4..];
-        let mut token_buf = rest[..60].to_vec();
-        let mut data_buf = rest[60..].to_vec();
+        let mut token_buf = rest[..security_trailer_len].to_vec();
+        let mut data_buf = rest[security_trailer_len..].to_vec();
 
         let mut msg_buffer = vec![
             SecurityBufferRef::token_buf(&mut token_buf),

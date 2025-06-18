@@ -1,11 +1,11 @@
 use error::JsErrorValue;
-use tracing::Level;
-use wasm_bindgen::prelude::wasm_bindgen;
 use std::sync::OnceLock;
-use tracing_subscriber::Registry;
+use tracing::Level;
 use tracing_subscriber::layer::SubscriberExt as _;
 use tracing_subscriber::reload;
-use wasm_tracing::{ConsoleConfig, WasmLayerConfig, WasmLayer};
+use tracing_subscriber::Registry;
+use wasm_bindgen::prelude::wasm_bindgen;
+use wasm_tracing::{ConsoleConfig, WasmLayer, WasmLayerConfig};
 
 pub mod authentication;
 pub mod dto;
@@ -92,7 +92,8 @@ fn init_or_update_logger(level: Level) {
 
     fn build_wasm_layer(level: Level) -> WasmLayer {
         let mut config = WasmLayerConfig::new();
-        config.set_console_config(ConsoleConfig::ReportWithConsoleColor)
+        config
+            .set_console_config(ConsoleConfig::ReportWithConsoleColor)
             .set_max_level(level);
         WasmLayer::new(config)
     }
