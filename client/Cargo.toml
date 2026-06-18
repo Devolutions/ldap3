@@ -13,7 +13,6 @@ repository.workspace = true
 [features]
 default = ["strict"]
 strict = ["ldap3_proto/strict"]
-openssl-vendored = ["openssl/vendored"]
 
 [lib]
 name = "ldap3_client"
@@ -21,16 +20,16 @@ path = "src/lib.rs"
 
 [dependencies]
 base64.workspace = true
-base64urlsafedata.workspace = true
 futures-util = { workspace = true, features = ["sink"] }
 ldap3_proto = { workspace = true, features = ["serde"] }
-serde= { workspace = true, features = ["derive"] }
-openssl.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_with = { workspace = true, features = ["base64"] }
 tokio = { workspace = true, features = ["net", "time", "sync", "io-util", "macros"] }
 tokio-util = { workspace = true, features = ["codec"] }
-tokio-openssl.workspace = true
+tokio-rustls.workspace = true
+rustls-platform-verifier.workspace = true
 tracing.workspace = true
 url.workspace = true
-uuid= {workspace = true, features = ["serde"] }
+uuid = {workspace = true, features = ["serde"] }
 
 

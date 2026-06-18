@@ -57,9 +57,14 @@ pub enum LdapControl {
     ServerSort {
         sort_requests: Vec<ServerSortRequet>,
     },
-
     ServerSortResult {
         sort_result: ServerSortResult,
+    },
+    PasswordPolicyRequest {
+        criticality: bool,
+    },
+    Unknown {
+        oid: String,
     },
 }
 
@@ -150,6 +155,14 @@ impl fmt::Debug for LdapControl {
             LdapControl::ServerSortResult { sort_result } => f
                 .debug_struct("LdapControl::ServerSortResult")
                 .field("sort_result", &sort_result)
+                .finish(),
+            LdapControl::PasswordPolicyRequest { criticality } => f
+                .debug_struct("LdapControl::PasswordPolicyRequest")
+                .field("criticality", &criticality)
+                .finish(),
+            LdapControl::Unknown { oid } => f
+                .debug_struct("LdapControl::Unknown")
+                .field("oid", &oid)
                 .finish(),
         }
     }
@@ -488,9 +501,19 @@ impl TryFrom<StructureTag> for LdapControl {
                     },
                 })
             }
-            oid => {
+            "1.3.6.1.4.1.42.2.27.8.5.1" => {
+                let criticality = criticality_tag
+                    .and_then(|t| t.match_class(TagClass::Universal))
+                    .and_then(|t| t.match_id(Types::Boolean as u64))
+                    .and_then(|t| t.expect_primitive())
+                    .and_then(ber_bool_to_bool)
+                    .unwrap_or(false);
+
+                Ok(LdapControl::PasswordPolicyRequest { criticality })
+            }
+            _ => {
                 warn!(%oid, "Unsupported control oid");
-                Err(LdapProtoError::ControlUnknown)
+                Ok(LdapControl::Unknown { oid })
             }
         }
     }
@@ -706,6 +729,10 @@ impl From<LdapControl> for Tag {
                     })),
                 )
             }
+            LdapControl::PasswordPolicyRequest { criticality } => {
+                ("1.3.6.1.4.1.42.2.27.8.5.1", criticality, None)
+            }
+            LdapControl::Unknown { ref oid } => (oid.as_str(), false, None),
         };
 
         let mut inner = Vec::with_capacity(3);

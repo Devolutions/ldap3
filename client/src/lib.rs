@@ -4,50 +4,53 @@
 #![deny(clippy::unimplemented)]
 #![deny(clippy::unwrap_used)]
 #![deny(clippy::panic)]
-#![deny(clippy::unreachable)]
 #![deny(clippy::await_holding_lock)]
 #![deny(clippy::needless_pass_by_value)]
 #![deny(clippy::trivially_copy_pass_by_ref)]
 // We allow expect since it forces good error messages at the least.
 #![allow(clippy::expect_used)]
 
-use serde::{Deserialize, Serialize};
-use std::pin::Pin;
-use tokio::io::{ReadHalf, WriteHalf};
-use tokio::net::TcpStream;
-use tokio::time;
-pub use tokio::time::Duration;
-pub use tracing::{debug, error, info, span, trace, warn};
-
+use base64::{engine::general_purpose, Engine as _};
 use futures_util::sink::SinkExt;
 use futures_util::stream::StreamExt;
-
 use ldap3_proto::proto::*;
 use ldap3_proto::LdapCodec;
-use openssl::ssl::{Ssl, SslConnector, SslMethod, SslVerifyMode};
-use openssl::x509::X509;
+use rustls_platform_verifier::ConfigVerifierExt;
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
 use std::fs::File;
 use std::io::Read;
 use std::path::Path;
-use tokio_openssl::SslStream;
+use std::sync::Arc;
+use tokio::io::{ReadHalf, WriteHalf};
+use tokio::net::TcpStream;
+use tokio::time;
+use tokio_rustls::{
+    client::TlsStream,
+    rustls::client::danger::*,
+    rustls::client::ClientConfig,
+    rustls::pki_types::{pem::PemObject, CertificateDer, ServerName, UnixTime},
+    rustls::Error as RustlsError,
+    rustls::RootCertStore,
+    rustls::{DigitallySignedStruct, SignatureScheme},
+    TlsConnector,
+};
+
 use tokio_util::codec::{FramedRead, FramedWrite};
-
-use std::fmt;
-use url::Url;
+use tracing::{error, info, trace, warn};
+use url::{Host, Url};
 use uuid::Uuid;
-
-use base64::{engine::general_purpose, Engine as _};
 
 pub use ldap3_proto::filter;
 pub use ldap3_proto::proto;
+pub use search::LdapSearchResult;
+pub use syncrepl::{LdapSyncRepl, LdapSyncReplEntry, LdapSyncStateValue};
+pub use tokio::time::Duration;
 
 mod addirsync;
 mod search;
 mod syncrepl;
-
-pub use search::LdapSearchResult;
-pub use syncrepl::{LdapSyncRepl, LdapSyncReplEntry, LdapSyncStateValue};
 
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, Deserialize, Serialize)]
@@ -105,17 +108,17 @@ impl fmt::Display for LdapError {
                 write!(f, "The LDAP server sent a response we did not expect")
             }
             LdapError::FileIOError => {
-                write!(f, "An error occured while accessing a file")
+                write!(f, "An error occurred while accessing a file")
             }
             LdapError::TransportReadError => {
-                write!(f, "An error occured reading from the transport")
+                write!(f, "An error occurred reading from the transport")
             }
             LdapError::TransportWriteError => {
-                write!(f, "An error occured writing to the transport")
+                write!(f, "An error occurred writing to the transport")
             }
             LdapError::UnavailableCriticalExtension => write!(f, "An extension marked as critical was not available"),
             LdapError::InvalidCredentials => write!(f, "Invalid DN or Password"),
-            LdapError::InsufficentAccessRights => write!(f, "Insufficent Access"),
+            LdapError::InsufficentAccessRights => write!(f, "Insufficient Access"),
             LdapError::UnwillingToPerform => write!(f, "Too many failures, server is unwilling to perform the operation."),
             LdapError::EsyncRefreshRequired => write!(f, "An initial content sync is required. The current cookie should be considered invalid."),
             LdapError::NotImplemented => write!(f, "An error occurred, but we haven't implemented code to handle this error yet.")
@@ -127,7 +130,7 @@ pub type LdapResult<T> = Result<T, LdapError>;
 
 enum LdapReadTransport {
     Plain(FramedRead<ReadHalf<TcpStream>, LdapCodec>),
-    Tls(FramedRead<ReadHalf<SslStream<TcpStream>>, LdapCodec>),
+    Tls(FramedRead<ReadHalf<TlsStream<TcpStream>>, LdapCodec>),
 }
 
 impl fmt::Debug for LdapReadTransport {
@@ -147,7 +150,7 @@ impl fmt::Debug for LdapReadTransport {
 
 enum LdapWriteTransport {
     Plain(FramedWrite<WriteHalf<TcpStream>, LdapCodec>),
-    Tls(FramedWrite<WriteHalf<SslStream<TcpStream>>, LdapCodec>),
+    Tls(FramedWrite<WriteHalf<TlsStream<TcpStream>>, LdapCodec>),
 }
 
 impl fmt::Debug for LdapWriteTransport {
@@ -206,6 +209,18 @@ pub struct LdapEntry {
 }
 
 impl LdapEntry {
+    pub fn get_ava_single(&self, attr: &str) -> Option<&str> {
+        if let Some(ava) = self.attrs.get(attr) {
+            if ava.len() == 1 {
+                ava.iter().next().map(String::as_ref)
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+
     pub fn remove_ava_single(&mut self, attr: &str) -> Option<String> {
         if let Some(ava) = self.attrs.remove(attr) {
             if ava.len() == 1 {
@@ -261,6 +276,8 @@ pub struct LdapClientBuilder<'a> {
     timeout: Duration,
     cas: Vec<&'a Path>,
     verify: bool,
+    /// The maximum LDAP packet size parsed during decoding.
+    max_ber_size: Option<usize>,
 }
 
 impl<'a> LdapClientBuilder<'a> {
@@ -270,12 +287,12 @@ impl<'a> LdapClientBuilder<'a> {
             timeout: Duration::from_secs(30),
             cas: Vec::new(),
             verify: true,
+            max_ber_size: None,
         }
     }
 
-    pub fn set_timeout(mut self, timeout: Duration) -> Self {
-        self.timeout = timeout;
-        self
+    pub fn set_timeout(self, timeout: Duration) -> Self {
+        Self { timeout, ..self }
     }
 
     pub fn add_tls_ca<T>(mut self, ca: &'a T) -> Self
@@ -286,9 +303,19 @@ impl<'a> LdapClientBuilder<'a> {
         self
     }
 
-    pub fn danger_accept_invalid_certs(mut self, accept_invalid_certs: bool) -> Self {
-        self.verify = accept_invalid_certs;
-        self
+    pub fn danger_accept_invalid_certs(self, accept_invalid_certs: bool) -> Self {
+        Self {
+            verify: !accept_invalid_certs,
+            ..self
+        }
+    }
+
+    /// Set the maximum size of a decoded message
+    pub fn max_ber_size(self, max_ber_size: Option<usize>) -> Self {
+        Self {
+            max_ber_size,
+            ..self
+        }
     }
 
     #[tracing::instrument(level = "debug", skip_all)]
@@ -298,6 +325,7 @@ impl<'a> LdapClientBuilder<'a> {
             timeout,
             cas,
             verify,
+            max_ber_size,
         } = self;
 
         info!(%url);
@@ -363,73 +391,99 @@ impl<'a> LdapClientBuilder<'a> {
             }
         };
 
-        // If ldaps - start openssl
+        // If they didn't set it in the builder then set it to the default
+        let max_ber_size = max_ber_size.unwrap_or(ldap3_proto::DEFAULT_MAX_BER_SIZE);
+
+        // If ldaps - start rustls
         let (write_transport, read_transport) = if need_tls {
-            let mut tls_parms = SslConnector::builder(SslMethod::tls_client()).map_err(|e| {
-                error!(?e, "openssl");
-                LdapError::TlsError
-            })?;
+            // What about the `verify` flag?
+            let tls_client_config = if !cas.is_empty() {
+                let mut cert_store = RootCertStore::empty();
+                for ca in cas.iter() {
+                    let mut file = File::open(ca).map_err(|e| {
+                        error!(?e, "Unable to open {:?}", ca);
+                        LdapError::FileIOError
+                    })?;
 
-            let cert_store = tls_parms.cert_store_mut();
-            for ca in cas.iter() {
-                let mut file = File::open(ca).map_err(|e| {
-                    error!(?e, "Unable to open {:?}", ca);
-                    LdapError::FileIOError
-                })?;
+                    let mut pem = Vec::new();
+                    file.read_to_end(&mut pem).map_err(|e| {
+                        error!(?e, "Unable to read {:?}", ca);
+                        LdapError::FileIOError
+                    })?;
 
-                let mut pem = Vec::new();
-                file.read_to_end(&mut pem).map_err(|e| {
-                    error!(?e, "Unable to read {:?}", ca);
-                    LdapError::FileIOError
-                })?;
-
-                let ca_cert = X509::from_pem(pem.as_slice()).map_err(|e| {
-                    error!(?e, "openssl");
-                    LdapError::TlsError
-                })?;
-
-                cert_store
-                    .add_cert(ca_cert)
-                    .map(|()| {
-                        info!("Added {:?} to cert store", ca);
-                    })
-                    .map_err(|e| {
-                        error!(?e, "openssl");
+                    let ca_cert = CertificateDer::from_pem_slice(pem.as_slice()).map_err(|e| {
+                        error!(?e, "rustls");
                         LdapError::TlsError
                     })?;
-            }
-            if verify {
-                tls_parms.set_verify(SslVerifyMode::PEER);
+
+                    cert_store
+                        .add(ca_cert)
+                        .map(|()| {
+                            info!("Added {:?} to cert store", ca);
+                        })
+                        .map_err(|e| {
+                            error!(?e, "rustls");
+                            LdapError::TlsError
+                        })?;
+                }
+
+                ClientConfig::builder()
+                    .with_root_certificates(cert_store)
+                    .with_no_client_auth()
+            } else if !verify {
+                warn!("⚠️ CERTIFICATE VERIFICATION IS DISABLED. THIS IS DANGEROUS!!!!");
+                let yolo_cert_validator = Arc::new(YoloCertValidator);
+
+                ClientConfig::builder()
+                    .dangerous()
+                    .with_custom_certificate_verifier(yolo_cert_validator)
+                    .with_no_client_auth()
             } else {
-                tls_parms.set_verify(SslVerifyMode::NONE);
-            }
-            let tls_parms = tls_parms.build();
+                // Just use the system CA roots.
+                ClientConfig::with_platform_verifier()
+            };
 
-            let mut tlsstream = Ssl::new(tls_parms.context())
-                .and_then(|tls_obj| SslStream::new(tls_obj, tcpstream))
-                .map_err(|e| {
-                    error!(?e, "openssl");
-                    LdapError::TlsError
-                })?;
+            let tls_connector = TlsConnector::from(Arc::new(tls_client_config));
 
-            SslStream::connect(Pin::new(&mut tlsstream))
+            let server_name = match url.host() {
+                Some(Host::Domain(name)) => {
+                    ServerName::try_from(name.to_owned()).map_err(|err| {
+                        error!(?err, "server name invalid");
+                        LdapError::TlsError
+                    })?
+                }
+                Some(Host::Ipv4(addr)) => ServerName::from(addr),
+                Some(Host::Ipv6(addr)) => ServerName::from(addr),
+                None => {
+                    error!("url invalid");
+                    return Err(LdapError::TlsError);
+                }
+            };
+
+            let tlsstream = tls_connector
+                .connect(
+                    server_name,
+                    // Pin::new(&mut tcpstream)
+                    tcpstream,
+                )
                 .await
                 .map_err(|e| {
-                    error!(?e, "openssl");
+                    error!(?e, "rustls");
                     LdapError::TlsError
                 })?;
 
             info!("tls configured");
+
             let (r, w) = tokio::io::split(tlsstream);
             (
                 LdapWriteTransport::Tls(FramedWrite::new(w, LdapCodec::default())),
-                LdapReadTransport::Tls(FramedRead::new(r, LdapCodec::new(Some(32768)))),
+                LdapReadTransport::Tls(FramedRead::new(r, LdapCodec::new(Some(max_ber_size)))),
             )
         } else {
             let (r, w) = tokio::io::split(tcpstream);
             (
                 LdapWriteTransport::Plain(FramedWrite::new(w, LdapCodec::default())),
-                LdapReadTransport::Plain(FramedRead::new(r, LdapCodec::new(Some(32768)))),
+                LdapReadTransport::Plain(FramedRead::new(r, LdapCodec::new(Some(max_ber_size)))),
             )
         };
 
@@ -459,7 +513,8 @@ impl LdapClient {
     }
 
     #[tracing::instrument(level = "debug", skip_all)]
-    pub async fn bind(&mut self, dn: String, pw: String) -> LdapResult<()> {
+    pub async fn bind<S: Into<String>>(&mut self, dn: S, pw: S) -> LdapResult<()> {
+        let dn = dn.into();
         info!(%dn);
         let msgid = self.get_next_msgid();
 
@@ -467,7 +522,7 @@ impl LdapClient {
             msgid,
             op: LdapOp::BindRequest(LdapBindRequest {
                 dn,
-                cred: LdapBindCred::Simple(pw),
+                cred: LdapBindCred::Simple(pw.into()),
             }),
             ctrl: vec![],
         };
@@ -520,4 +575,71 @@ impl LdapClient {
                 }
             })
     }
+}
+
+#[derive(Debug)]
+/// This should never be used for anything but testing, as it does no verification!
+struct YoloCertValidator;
+
+impl ServerCertVerifier for YoloCertValidator {
+    fn verify_server_cert(
+        &self,
+        _end_entity: &CertificateDer<'_>,
+        _intermediates: &[CertificateDer<'_>],
+        _server_name: &ServerName<'_>,
+        _ocsp_response: &[u8],
+        _now: UnixTime,
+    ) -> Result<ServerCertVerified, RustlsError> {
+        // Yolo.
+        Ok(ServerCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        _message: &[u8],
+        _cert: &CertificateDer<'_>,
+        _dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, RustlsError> {
+        Ok(HandshakeSignatureValid::assertion())
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        _message: &[u8],
+        _cert: &CertificateDer<'_>,
+        _dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, RustlsError> {
+        Ok(HandshakeSignatureValid::assertion())
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+        vec![
+            SignatureScheme::RSA_PKCS1_SHA384,
+            SignatureScheme::ECDSA_NISTP256_SHA256,
+            SignatureScheme::RSA_PKCS1_SHA256,
+            SignatureScheme::ECDSA_NISTP384_SHA384,
+            SignatureScheme::RSA_PKCS1_SHA512,
+            SignatureScheme::ECDSA_NISTP521_SHA512,
+        ]
+    }
+}
+
+/// Doesn't test the actual *build* step because that requires a live LDAP server.
+#[test]
+fn test_ldapclient_builder() {
+    let url = Url::parse("ldap://ldap.example.com:389").unwrap();
+    let client = LdapClientBuilder::new(&url).max_ber_size(Some(1234567));
+    assert_eq!(client.timeout, Duration::from_secs(30));
+    let client = client.set_timeout(Duration::from_secs(60));
+    assert_eq!(client.timeout, Duration::from_secs(60));
+    assert_eq!(client.cas.len(), 0);
+    assert_eq!(client.max_ber_size, Some(1234567));
+    assert_eq!(client.verify, true);
+
+    let ca_path = "test.pem".to_string();
+    let client = client.add_tls_ca(&ca_path);
+    assert_eq!(client.cas.len(), 1);
+
+    let badssl_client = client.danger_accept_invalid_certs(true);
+    assert_eq!(badssl_client.verify, false);
 }

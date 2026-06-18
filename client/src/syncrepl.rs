@@ -1,8 +1,8 @@
 use crate::LdapClient;
 use crate::*;
-use base64urlsafedata::Base64UrlSafeData;
 use ldap3_proto::control::LdapControl;
 use serde::{Deserialize, Serialize};
+use serde_with::{base64, formats, serde_as};
 
 #[derive(Debug, Deserialize, Serialize, PartialEq)]
 pub enum LdapSyncStateValue {
@@ -30,10 +30,12 @@ pub struct LdapSyncReplEntry {
     pub entry: LdapEntry,
 }
 
+#[serde_as]
 #[derive(Debug, Deserialize, Serialize)]
 pub enum LdapSyncRepl {
     Success {
-        cookie: Option<Base64UrlSafeData>,
+        #[serde_as(as = "Option<base64::Base64<base64::UrlSafe, formats::Unpadded>>")]
+        cookie: Option<Vec<u8>>,
         refresh_deletes: bool,
         entries: Vec<LdapSyncReplEntry>,
         delete_uuids: Option<Vec<Uuid>>,
@@ -44,9 +46,9 @@ pub enum LdapSyncRepl {
 
 impl LdapClient {
     #[tracing::instrument(level = "debug", skip_all)]
-    pub async fn syncrepl(
+    pub async fn syncrepl<S: Into<String>>(
         &mut self,
-        basedn: String,
+        basedn: S,
         filter: LdapFilter,
         cookie: Option<Vec<u8>>,
         mode: SyncRequestMode,
@@ -56,7 +58,7 @@ impl LdapClient {
         let msg = LdapMsg {
             msgid,
             op: LdapOp::SearchRequest(LdapSearchRequest {
-                base: basedn,
+                base: basedn.into(),
                 scope: LdapSearchScope::Subtree,
                 aliases: LdapDerefAliases::Never,
                 sizelimit: 0,
@@ -96,7 +98,6 @@ impl LdapClient {
                         refresh_deletes,
                     }) = msg.ctrl.pop()
                     {
-                        let cookie = cookie.map(Base64UrlSafeData);
                         break Ok(LdapSyncRepl::Success {
                             cookie,
                             refresh_deletes,
@@ -146,7 +147,7 @@ impl LdapClient {
                     done: false,
                 }) => {
                     // These are no-ops that are skipped for our purposes
-                    // They are intended to deliniate the seperate phases, but we actually don't
+                    // They are intended to deliniate the separate phases, but we actually don't
                     // care until we get the search result done.
                     let _d_uuids = delete_uuids.get_or_insert_with(Vec::default);
                 }
@@ -157,7 +158,7 @@ impl LdapClient {
                     },
                 ) => {
                     // These are no-ops that are skipped for our purposes
-                    // They are intended to deliniate the seperate phases, but we actually don't
+                    // They are intended to deliniate the separate phases, but we actually don't
                     // care until we get the search result done.
                     let _p_uuids = present_uuids.get_or_insert_with(Vec::default);
                 }

@@ -1,4 +1,3 @@
-
 /*
 #[derive(clap::ValueEnum, Debug, Clone)]
 enum SyncRequestMode {
@@ -13,6 +12,8 @@ impl Default for SyncRequestMode {
 }
 */
 
+use url::Url;
+
 #[derive(Debug, clap::Subcommand)]
 enum LdapAction {
     /// Search a directory server
@@ -22,7 +23,6 @@ enum LdapAction {
 
         // /// scope
         // scope
-
         /// Execute this query
         filter: String,
     },
@@ -56,11 +56,11 @@ enum LdapAction {
 #[clap(about = "Ldap Client Utility")]
 struct LdapOpt {
     #[structopt(short, long)]
-    /// Display extended infomation during runtime.
+    /// Display extended information during runtime.
     verbose: bool,
 
     #[clap(short = 'H', long = "url")]
-    url: url::Url,
+    url: Url,
 
     #[clap(short = 'j', long = "json")]
     json: bool,
@@ -76,6 +76,5 @@ struct LdapOpt {
 
     #[clap(subcommand)]
     /// The ldap action to perform
-    action: LdapAction
+    action: LdapAction,
 }
-

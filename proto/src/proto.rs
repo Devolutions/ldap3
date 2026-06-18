@@ -354,7 +354,7 @@ impl LdapMatchingRuleAssertion {
 }
 
 #[derive(Debug, Clone, PartialEq, Hash, Eq, PartialOrd, Ord)]
-#[cfg_attr(feature = "serde", derive(Serialize))]
+#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
 pub enum LdapFilter {
     And(Vec<LdapFilter>),
@@ -1476,7 +1476,7 @@ impl TryFrom<Vec<StructureTag>> for LdapBindResponse {
 
         // Now with the remaining tags, as per rfc4511#section-4.2.2, we extract the optional sasl creds. Class Context, id 7. OctetString.
         let saslcreds = tags
-            .get(0)
+            .first()
             .map(|tag| {
                 debug!(?tag);
                 let vec = tag
@@ -2051,7 +2051,7 @@ impl TryFrom<Vec<StructureTag>> for LdapSearchRequest {
             .pop()
             .and_then(|t| t.match_class(TagClass::Universal))
             .and_then(|t|
-                // Some non-complient clients will not tag this as enum.
+                // Some non-compliant clients will not tag this as enum.
                 if cfg!(feature = "strict") {
                     t.match_id(Types::Enumerated as u64)
                 } else {

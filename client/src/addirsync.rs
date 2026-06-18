@@ -1,6 +1,5 @@
 use crate::LdapClient;
 use crate::*;
-use base64urlsafedata::Base64UrlSafeData;
 use ldap3_proto::control::LdapControl;
 
 #[derive(Debug)]
@@ -11,7 +10,7 @@ pub struct LdapSyncReplEntry {
 
 #[derive(Debug)]
 pub struct LdapSyncRepl {
-    pub cookie: Option<Base64UrlSafeData>,
+    pub cookie: Option<Vec<u8>>,
     pub entries: Vec<LdapSyncReplEntry>,
     pub delete_uuids: Vec<Uuid>,
     pub present_uuids: Vec<Uuid>,
@@ -19,9 +18,9 @@ pub struct LdapSyncRepl {
 
 impl LdapClient {
     #[tracing::instrument(level = "debug", skip_all)]
-    pub async fn ad_dirsync(
+    pub async fn ad_dirsync<S: Into<String>>(
         &mut self,
-        basedn: String,
+        basedn: S,
         cookie: Option<Vec<u8>>,
     ) -> crate::LdapResult<LdapSyncRepl> {
         let msgid = self.get_next_msgid();
@@ -29,7 +28,7 @@ impl LdapClient {
         let msg = LdapMsg {
             msgid,
             op: LdapOp::SearchRequest(LdapSearchRequest {
-                base: basedn,
+                base: basedn.into(),
                 scope: LdapSearchScope::Subtree,
                 aliases: LdapDerefAliases::Never,
                 sizelimit: 0,
@@ -69,7 +68,6 @@ impl LdapClient {
                         cookie,
                     }) = msg.ctrl.pop()
                     {
-                        let cookie = cookie.map(Base64UrlSafeData);
                         break Ok(LdapSyncRepl {
                             cookie,
                             entries,

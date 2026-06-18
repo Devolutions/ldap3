@@ -16,6 +16,7 @@ use ldap3_client::*;
 use std::fs::File;
 use std::io::BufReader;
 use std::path::PathBuf;
+use tracing::*;
 
 include!("ldap_debug_opt.rs");
 
@@ -24,9 +25,11 @@ fn main() {
     ldap3_cli_common::start_tracing(opt.verbose);
     info!("ldap debugging assistance tool");
 
+    /*
     if cfg!(feature = "strict") {
         info!("strict is enabled, some features may not work");
     }
+    */
 
     match opt.action {
         LdapDebugAction::BerDump(ber_dump_opts) => {

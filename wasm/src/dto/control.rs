@@ -99,6 +99,12 @@ pub enum LdapControl {
     ServerSortResult {
         sort_result: ServerSortResult,
     },
+    PasswordPolicyRequest {
+        criticality: bool,
+    },
+    Unknown {
+        oid: String,
+    },
 }
 
 impl From<ldap3_proto::control::LdapControl> for LdapControl {
@@ -159,7 +165,11 @@ impl From<ldap3_proto::control::LdapControl> for LdapControl {
                 LdapControl::ServerSortResult {
                     sort_result: sort_result.into(), // Same as above.
                 }
-            } // Add cases for other variants if they exist.
+            }
+            ldap3_proto::control::LdapControl::PasswordPolicyRequest { criticality } => {
+                LdapControl::PasswordPolicyRequest { criticality }
+            }
+            ldap3_proto::control::LdapControl::Unknown { oid } => LdapControl::Unknown { oid },
         }
     }
 }
@@ -218,7 +228,11 @@ impl From<LdapControl> for ldap3_proto::control::LdapControl {
                 ldap3_proto::control::LdapControl::ServerSortResult {
                     sort_result: sort_result.into(), // Same as above.
                 }
-            } // Add cases for other variants if they exist.
+            }
+            LdapControl::PasswordPolicyRequest { criticality } => {
+                ldap3_proto::control::LdapControl::PasswordPolicyRequest { criticality }
+            }
+            LdapControl::Unknown { oid } => ldap3_proto::control::LdapControl::Unknown { oid },
         }
     }
 }
