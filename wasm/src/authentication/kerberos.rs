@@ -13,6 +13,7 @@ use super::{AsyncNetworkClient, SecurityProvider, SecurityProviderError, StepRes
 // FIXME: typo in Kerberos
 
 pub struct KerberoAuthProvier {
+    // Negotiate (SPNEGO) restricted to Kerberos: Windows LDAP expects a standard SPNEGO token, not a raw Kerberos one
     kerbero: Negotiate, // FIXME: typo
     credentials_handle: <Negotiate as SspiImpl>::CredentialsHandle,
     server_computer_name: String,
