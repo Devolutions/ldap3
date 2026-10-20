@@ -7,6 +7,20 @@ pub mod kerberos;
 pub mod negotiate;
 pub mod ntlm;
 
+#[cfg(test)]
+#[derive(Clone, Default)]
+pub(crate) struct TestNetworkClient {
+    pub requests: std::rc::Rc<std::cell::RefCell<Vec<NetworkRequest>>>,
+}
+
+#[cfg(test)]
+impl AsyncNetworkClient for TestNetworkClient {
+    fn send(&self, request: NetworkRequest) -> LocalBoxFuture<'_, anyhow::Result<Vec<u8>>> {
+        self.requests.borrow_mut().push(request);
+        Box::pin(async { anyhow::bail!("KDC blocked by regression test") })
+    }
+}
+
 /*
 We are not seeking to implement GSSAPI encryption/decryption, at this time.
 We will use LDAP over TLS, instead.
@@ -60,18 +74,23 @@ impl AsyncNetworkClient for WasmNetworkClient {
                 | sspi::network_client::NetworkProtocol::Https => {
                     let body = js_sys::Uint8Array::from(&network_request.data[..]);
 
-                    gloo_net::http::Request::post(network_request.url.as_str())
+                    // Avoid exposing the token-bearing proxy URL in transport errors.
+                    let response = gloo_net::http::Request::post(network_request.url.as_str())
                         .header("keep-alive", "true")
                         .body(body)
-                        .unwrap()
+                        .map_err(|_| anyhow::anyhow!("unable to build KDC proxy request"))?
                         .send()
                         .await
-                        .unwrap()
+                        .map_err(|_| anyhow::anyhow!("unable to send KDC proxy request"))?;
+                    if !response.ok() {
+                        anyhow::bail!("KDC proxy returned HTTP {}", response.status());
+                    }
+                    response
                         .binary()
                         .await
-                        .context("gloo_net::http::Request::post failed")
+                        .context("unable to read KDC proxy response")
                 }
-                _ => panic!("unsupported protocol for KDC proxy"),
+                _ => anyhow::bail!("KDC proxy requires HTTP or HTTPS"),
             }
         })
     }

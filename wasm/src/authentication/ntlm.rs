@@ -12,8 +12,6 @@ pub(crate) struct NtlmAuthProvier {
     server_computer_name: String,
     sign: Option<bool>,
     seal: Option<bool>,
-    sequence_number: u32,
-    recv_sequence_number: u32,
     status: Option<SecurityStatus>,
 }
 
@@ -44,22 +42,8 @@ impl NtlmAuthProvier {
             server_computer_name: server_computer_name.to_string(),
             sign,
             seal,
-            sequence_number: 0,
-            recv_sequence_number: 0,
             status: None,
         })
-    }
-
-    fn next_sequence_number(&mut self) -> u32 {
-        let res = self.sequence_number;
-        self.sequence_number += 1;
-        res
-    }
-
-    fn next_recv_sequence_number(&mut self) -> u32 {
-        let res = self.recv_sequence_number;
-        self.recv_sequence_number += 1;
-        res
     }
 }
 impl SecurityProvider for NtlmAuthProvier {
@@ -122,9 +106,8 @@ impl SecurityProvider for NtlmAuthProvier {
             SecurityBufferRef::token_buf(&mut token),
             SecurityBufferRef::data_buf(&mut input),
         ];
-        let seq = self.next_sequence_number();
         self.ntlm
-            .encrypt_message(EncryptionFlags::empty(), &mut msg_buffer, seq)?;
+            .encrypt_message(EncryptionFlags::empty(), &mut msg_buffer)?;
 
         let mut output = Vec::new();
         let length = msg_buffer[0].buf_len() as u32 + msg_buffer[1].buf_len() as u32;
@@ -153,8 +136,7 @@ impl SecurityProvider for NtlmAuthProvier {
             SecurityBufferRef::token_buf(&mut first_16_bytes),
             SecurityBufferRef::data_buf(&mut data_buf),
         ];
-        let seq = self.next_recv_sequence_number();
-        self.ntlm.decrypt_message(&mut msg_buffer, seq)?;
+        self.ntlm.decrypt_message(&mut msg_buffer)?;
 
         Ok(data_buf)
     }
