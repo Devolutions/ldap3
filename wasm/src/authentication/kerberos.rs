@@ -10,11 +10,9 @@ use tracing::debug;
 
 use super::{AsyncNetworkClient, SecurityProvider, SecurityProviderError, StepResult};
 
-// FIXME: typo in Kerberos
-
-pub struct KerberoAuthProvier {
+pub struct KerberosAuthProvider {
     // Negotiate (SPNEGO) restricted to Kerberos: Windows LDAP expects a standard SPNEGO token, not a raw Kerberos one
-    kerbero: Negotiate, // FIXME: typo
+    kerberos: Negotiate,
     credentials_handle: <Negotiate as SspiImpl>::CredentialsHandle,
     server_computer_name: String,
     sign: Option<bool>,
@@ -24,7 +22,7 @@ pub struct KerberoAuthProvier {
 }
 
 #[derive(typed_builder::TypedBuilder)]
-pub struct KerberoInitParams<'a> {
+pub struct KerberosInitParams<'a> {
     pub ldap_username: &'a str,
     pub ldap_password: &'a str,
     pub domain: Option<&'a str>,
@@ -36,16 +34,16 @@ pub struct KerberoInitParams<'a> {
     pub client: Option<Box<dyn AsyncNetworkClient>>,
 }
 
-impl<'a> TryFrom<KerberoInitParams<'a>> for KerberoAuthProvier {
+impl<'a> TryFrom<KerberosInitParams<'a>> for KerberosAuthProvider {
     type Error = anyhow::Error;
-    fn try_from(value: KerberoInitParams) -> Result<KerberoAuthProvier, anyhow::Error> {
-        KerberoAuthProvier::new(value)
+    fn try_from(value: KerberosInitParams) -> Result<KerberosAuthProvider, anyhow::Error> {
+        KerberosAuthProvider::new(value)
     }
 }
 
-impl KerberoAuthProvier {
-    pub(crate) fn new(params: KerberoInitParams) -> anyhow::Result<Self> {
-        let KerberoInitParams {
+impl KerberosAuthProvider {
+    pub(crate) fn new(params: KerberosInitParams) -> anyhow::Result<Self> {
+        let KerberosInitParams {
             ldap_username,
             ldap_password,
             domain,
@@ -96,18 +94,18 @@ impl KerberoAuthProvier {
             Some("kerberos,!ntlm,!pku2u".to_string()),
             client_computer_name.to_string(),
         );
-        let mut kerbero = Negotiate::new_client(negotiate_config)?;
+        let mut kerberos = Negotiate::new_client(negotiate_config)?;
 
-        let acq_cred_result = kerbero
+        let acq_cred_result = kerberos
             .acquire_credentials_handle()
             .with_credential_use(CredentialUse::Outbound)
             .with_auth_data(&identity.into())
-            .execute(&mut kerbero)?;
+            .execute(&mut kerberos)?;
 
         let client = client.unwrap();
 
         let res = Self {
-            kerbero,
+            kerberos,
             credentials_handle: acq_cred_result.credentials_handle,
             server_computer_name: server_computer_name.to_string(),
             sign,
@@ -120,7 +118,7 @@ impl KerberoAuthProvier {
     }
 }
 
-impl SecurityProvider for KerberoAuthProvier {
+impl SecurityProvider for KerberosAuthProvider {
     fn step<'a>(&'a mut self, input: &'a [u8]) -> LocalBoxFuture<'a, StepResult> {
         Box::pin(async move {
             let mut output_buffer = vec![SecurityBuffer::new(Vec::new(), BufferType::Token)];
@@ -153,7 +151,7 @@ impl SecurityProvider for KerberoAuthProvier {
 
             let result = {
                 let mut generator = self
-                    .kerbero
+                    .kerberos
                     .initialize_security_context_impl(&mut builder)?;
                 let mut state = generator.start();
 
@@ -175,7 +173,7 @@ impl SecurityProvider for KerberoAuthProvier {
             .contains(&result.status)
             {
                 debug!("Completing the token...");
-                self.kerbero.complete_auth_token(&mut output_buffer)?;
+                self.kerberos.complete_auth_token(&mut output_buffer)?;
             }
 
             self.context_status = Some(result.status);
@@ -186,14 +184,14 @@ impl SecurityProvider for KerberoAuthProvier {
     fn encrypt(&mut self, input: &[u8]) -> Result<Vec<u8>, super::SecurityProviderError> {
         let mut input = input.to_vec();
 
-        let security_trailer_len = self.kerbero.query_context_sizes()?.security_trailer as usize;
+        let security_trailer_len = self.kerberos.query_context_sizes()?.security_trailer as usize;
         let mut token = vec![0; security_trailer_len];
 
         let mut msg_buffer = vec![
             SecurityBufferRef::token_buf(&mut token),
             SecurityBufferRef::data_buf(&mut input),
         ];
-        self.kerbero
+        self.kerberos
             .encrypt_message(EncryptionFlags::empty(), &mut msg_buffer)?;
 
         let mut output = Vec::new();
@@ -216,7 +214,7 @@ impl SecurityProvider for KerberoAuthProvier {
             return Err(SecurityProviderError::BufferNotLargeEnough(length + 4));
         }
 
-        let security_trailer_len = self.kerbero.query_context_sizes()?.security_trailer as usize;
+        let security_trailer_len = self.kerberos.query_context_sizes()?.security_trailer as usize;
 
         let rest = &input[4..];
         let mut token_buf = rest[..security_trailer_len].to_vec();
@@ -227,7 +225,7 @@ impl SecurityProvider for KerberoAuthProvier {
             SecurityBufferRef::data_buf(&mut data_buf),
         ];
 
-        self.kerbero.decrypt_message(&mut msg_buffer)?;
+        self.kerberos.decrypt_message(&mut msg_buffer)?;
 
         Ok(data_buf)
     }
@@ -239,7 +237,7 @@ impl SecurityProvider for KerberoAuthProvier {
 
 #[cfg(test)]
 mod tests {
-    use super::{KerberoAuthProvier, KerberoInitParams};
+    use super::{KerberosAuthProvider, KerberosInitParams};
     use crate::authentication::{SecurityProvider, TestNetworkClient};
     use futures_util::FutureExt;
     use sspi::{AuthIdentity, CredentialsBuffers};
@@ -256,7 +254,7 @@ mod tests {
             ),
             ("alice@other.example.test", None, "other.example.test"),
         ] {
-            let params = KerberoInitParams::builder()
+            let params = KerberosInitParams::builder()
                 .ldap_username(username)
                 .ldap_password("not-a-real-password")
                 .domain(domain)
@@ -267,7 +265,7 @@ mod tests {
                 .seal(Some(true))
                 .client(Some(Box::new(TestNetworkClient::default())))
                 .build();
-            let provider = KerberoAuthProvier::new(params).expect("provider");
+            let provider = KerberosAuthProvider::new(params).expect("provider");
             let identity = match provider.credentials_handle.as_ref() {
                 Some(CredentialsBuffers::AuthIdentity(identity)) => {
                     AuthIdentity::try_from(identity).expect("identity")
@@ -284,7 +282,7 @@ mod tests {
     fn kerberos_requires_kdc_before_a_bind() {
         let network = TestNetworkClient::default();
         let url = "https://gateway.example.test/jet/KdcProxy/test";
-        let params = KerberoInitParams::builder()
+        let params = KerberosInitParams::builder()
             .ldap_username("alice")
             .ldap_password("not-a-real-password")
             .domain(Some("ad.example.test"))
@@ -295,7 +293,7 @@ mod tests {
             .seal(Some(true))
             .client(Some(Box::new(network.clone())))
             .build();
-        let mut provider = KerberoAuthProvier::new(params).expect("provider");
+        let mut provider = KerberosAuthProvider::new(params).expect("provider");
         let error = provider
             .step(&[])
             .now_or_never()

@@ -9,10 +9,10 @@ use sspi::{
 use tracing::debug;
 
 use super::{
-    kerberos::KerberoInitParams, AsyncNetworkClient, SecurityProvider, SecurityProviderError,
+    kerberos::KerberosInitParams, AsyncNetworkClient, SecurityProvider, SecurityProviderError,
     StepResult,
 };
-pub struct NegotiateAuthProvier {
+pub struct NegotiateAuthProvider {
     negotiate: Negotiate,
     credentials_handle: <Negotiate as SspiImpl>::CredentialsHandle,
     server_computer_name: String,
@@ -22,17 +22,17 @@ pub struct NegotiateAuthProvier {
     context_status: Option<SecurityStatus>,
 }
 
-impl TryFrom<KerberoInitParams<'_>> for NegotiateAuthProvier {
+impl TryFrom<KerberosInitParams<'_>> for NegotiateAuthProvider {
     type Error = anyhow::Error;
 
-    fn try_from(value: KerberoInitParams) -> Result<Self, Self::Error> {
-        NegotiateAuthProvier::new(value)
+    fn try_from(value: KerberosInitParams) -> Result<Self, Self::Error> {
+        NegotiateAuthProvider::new(value)
     }
 }
 
-impl NegotiateAuthProvier {
-    pub(crate) fn new(param: KerberoInitParams) -> anyhow::Result<Self> {
-        let KerberoInitParams {
+impl NegotiateAuthProvider {
+    pub(crate) fn new(param: KerberosInitParams) -> anyhow::Result<Self> {
+        let KerberosInitParams {
             ldap_username,
             ldap_password,
             domain,
@@ -102,7 +102,7 @@ impl NegotiateAuthProvier {
     }
 }
 
-impl SecurityProvider for NegotiateAuthProvier {
+impl SecurityProvider for NegotiateAuthProvider {
     fn step<'a>(&'a mut self, input: &'a [u8]) -> LocalBoxFuture<'a, StepResult> {
         Box::pin(async move {
             let mut output_buffer = vec![SecurityBuffer::new(Vec::new(), BufferType::Token)];
@@ -228,7 +228,7 @@ impl SecurityProvider for NegotiateAuthProvier {
 
 #[cfg(test)]
 mod tests {
-    use super::{KerberoInitParams, NegotiateAuthProvier};
+    use super::{KerberosInitParams, NegotiateAuthProvider};
     use crate::authentication::{SecurityProvider, TestNetworkClient};
     use futures_util::FutureExt;
     use picky_krb::gss_api::{ApplicationTag0, GssApiNegInit};
@@ -239,9 +239,9 @@ mod tests {
         domain: Option<&str>,
         kdc_proxy_url: Option<&str>,
         protected: bool,
-    ) -> anyhow::Result<(NegotiateAuthProvier, TestNetworkClient)> {
+    ) -> anyhow::Result<(NegotiateAuthProvider, TestNetworkClient)> {
         let network = TestNetworkClient::default();
-        let params = KerberoInitParams::builder()
+        let params = KerberosInitParams::builder()
             .ldap_username(username)
             .ldap_password("not-a-real-password")
             .domain(domain)
@@ -252,10 +252,10 @@ mod tests {
             .seal(Some(protected))
             .client(Some(Box::new(network.clone())))
             .build();
-        Ok((NegotiateAuthProvier::new(params)?, network))
+        Ok((NegotiateAuthProvider::new(params)?, network))
     }
 
-    fn identity(provider: &NegotiateAuthProvier) -> AuthIdentity {
+    fn identity(provider: &NegotiateAuthProvider) -> AuthIdentity {
         match provider.credentials_handle.as_ref() {
             Some(CredentialsBuffers::AuthIdentity(identity)) => {
                 AuthIdentity::try_from(identity).expect("identity")
