@@ -2,8 +2,9 @@ use anyhow::Context;
 use futures_util::future::LocalBoxFuture;
 use sspi::{
     builders::EmptyInitializeSecurityContext, detect_kdc_url, AuthIdentity, BufferType,
-    ClientRequestFlags, CredentialUse, DataRepresentation, EncryptionFlags, Kerberos,
-    KerberosConfig, SecurityBuffer, SecurityBufferRef, SecurityStatus, Sspi, SspiImpl, Username,
+    ClientRequestFlags, CredentialUse, DataRepresentation, EncryptionFlags, KerberosConfig,
+    Negotiate, NegotiateConfig, SecurityBuffer, SecurityBufferRef, SecurityStatus, Sspi, SspiImpl,
+    Username,
 };
 use tracing::debug;
 
@@ -12,14 +13,12 @@ use super::{AsyncNetworkClient, SecurityProvider, SecurityProviderError, StepRes
 // FIXME: typo in Kerberos
 
 pub struct KerberoAuthProvier {
-    kerbero: Kerberos, // FIXME: typo
-    credentials_handle: <Kerberos as SspiImpl>::CredentialsHandle,
+    kerbero: Negotiate, // FIXME: typo
+    credentials_handle: <Negotiate as SspiImpl>::CredentialsHandle,
     server_computer_name: String,
     sign: Option<bool>,
     seal: Option<bool>,
     client: Box<dyn AsyncNetworkClient>,
-    sequence_number: u32,
-    recv_sequence_number: u32,
     context_status: Option<SecurityStatus>,
 }
 
@@ -58,8 +57,8 @@ impl KerberoAuthProvier {
         } = params;
 
         let username = match Username::parse(ldap_username) {
-            Ok(username) => username,
-            Err(_) => Username::new(ldap_username, domain)
+            Ok(username) if username.domain_name().is_some() => username,
+            _ => Username::new(ldap_username, domain)
                 .with_context(|| format!("Failed to parse username: {}", ldap_username))?,
         };
 
@@ -87,15 +86,22 @@ impl KerberoAuthProvier {
             }
         };
         let kerb_config = KerberosConfig::new(&url, client_computer_name.to_string());
+        if kerb_config.kdc_url.is_none() {
+            anyhow::bail!("invalid KDC proxy URL");
+        }
 
-        let mut kerbero = Kerberos::new_client_from_config(kerb_config).unwrap();
+        let negotiate_config = NegotiateConfig::new(
+            Box::new(kerb_config),
+            Some("kerberos,!ntlm,!pku2u".to_string()),
+            client_computer_name.to_string(),
+        );
+        let mut kerbero = Negotiate::new_client(negotiate_config)?;
 
         let acq_cred_result = kerbero
             .acquire_credentials_handle()
             .with_credential_use(CredentialUse::Outbound)
             .with_auth_data(&identity.into())
-            .execute(&mut kerbero)
-            .unwrap();
+            .execute(&mut kerbero)?;
 
         let client = client.unwrap();
 
@@ -106,24 +112,10 @@ impl KerberoAuthProvier {
             sign,
             seal,
             client,
-            sequence_number: 0,
-            recv_sequence_number: 0,
             context_status: None,
         };
 
         Ok(res)
-    }
-
-    fn next_sequence_number(&mut self) -> u32 {
-        let res = self.sequence_number;
-        self.sequence_number += 1;
-        res
-    }
-
-    fn next_recv_sequence_number(&mut self) -> u32 {
-        let res = self.recv_sequence_number;
-        self.recv_sequence_number += 1;
-        res
     }
 }
 
@@ -149,7 +141,7 @@ impl SecurityProvider for KerberoAuthProvier {
             }
 
             let mut builder = EmptyInitializeSecurityContext::<
-                <Kerberos as SspiImpl>::CredentialsHandle,
+                <Negotiate as SspiImpl>::CredentialsHandle,
             >::default()
             .with_credentials_handle(&mut self.credentials_handle)
             .with_context_requirements(flag)
@@ -185,6 +177,7 @@ impl SecurityProvider for KerberoAuthProvier {
                 self.kerbero.complete_auth_token(&mut output_buffer)?;
             }
 
+            self.context_status = Some(result.status);
             Ok(output_buffer[0].buffer.clone())
         })
     }
@@ -199,9 +192,8 @@ impl SecurityProvider for KerberoAuthProvier {
             SecurityBufferRef::token_buf(&mut token),
             SecurityBufferRef::data_buf(&mut input),
         ];
-        let seq = self.next_sequence_number();
         self.kerbero
-            .encrypt_message(EncryptionFlags::empty(), &mut msg_buffer, seq)?;
+            .encrypt_message(EncryptionFlags::empty(), &mut msg_buffer)?;
 
         let mut output = Vec::new();
         let length = msg_buffer[0].buf_len() as u32 + msg_buffer[1].buf_len() as u32;
@@ -234,14 +226,89 @@ impl SecurityProvider for KerberoAuthProvier {
             SecurityBufferRef::data_buf(&mut data_buf),
         ];
 
-        let seq = self.next_recv_sequence_number();
-
-        self.kerbero.decrypt_message(&mut msg_buffer, seq)?;
+        self.kerbero.decrypt_message(&mut msg_buffer)?;
 
         Ok(data_buf)
     }
 
     fn status(&self) -> Option<sspi::SecurityStatus> {
         self.context_status
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{KerberoAuthProvier, KerberoInitParams};
+    use crate::authentication::{SecurityProvider, TestNetworkClient};
+    use futures_util::FutureExt;
+    use sspi::{AuthIdentity, CredentialsBuffers};
+
+    #[test]
+    fn provided_domain_is_preserved() {
+        for (username, domain, expected_domain) in [
+            ("alice", Some("ad.example.test"), "ad.example.test"),
+            ("OTHER\\alice", Some("ad.example.test"), "OTHER"),
+            (
+                "alice@other.example.test",
+                Some("ad.example.test"),
+                "other.example.test",
+            ),
+            ("alice@other.example.test", None, "other.example.test"),
+        ] {
+            let params = KerberoInitParams::builder()
+                .ldap_username(username)
+                .ldap_password("not-a-real-password")
+                .domain(domain)
+                .kdc_proxy_url(Some("https://gateway.example.test/jet/KdcProxy/test"))
+                .client_computer_name("test-client")
+                .server_computer_name("dc.ad.example.test")
+                .sign(Some(true))
+                .seal(Some(true))
+                .client(Some(Box::new(TestNetworkClient::default())))
+                .build();
+            let provider = KerberoAuthProvier::new(params).expect("provider");
+            let identity = match provider.credentials_handle.as_ref() {
+                Some(CredentialsBuffers::AuthIdentity(identity)) => {
+                    AuthIdentity::try_from(identity).expect("identity")
+                }
+                _ => panic!("expected password credentials"),
+            };
+
+            assert_eq!(identity.username.account_name(), "alice");
+            assert_eq!(identity.username.domain_name(), Some(expected_domain));
+        }
+    }
+
+    #[test]
+    fn kerberos_requires_kdc_before_a_bind() {
+        let network = TestNetworkClient::default();
+        let url = "https://gateway.example.test/jet/KdcProxy/test";
+        let params = KerberoInitParams::builder()
+            .ldap_username("alice")
+            .ldap_password("not-a-real-password")
+            .domain(Some("ad.example.test"))
+            .kdc_proxy_url(Some(url))
+            .client_computer_name("test-client")
+            .server_computer_name("dc.ad.example.test")
+            .sign(Some(true))
+            .seal(Some(true))
+            .client(Some(Box::new(network.clone())))
+            .build();
+        let mut provider = KerberoAuthProvier::new(params).expect("provider");
+        let error = provider
+            .step(&[])
+            .now_or_never()
+            .expect("synchronous test network")
+            .expect_err("KDC failure must not emit an LDAP token");
+
+        assert!(error.to_string().contains("KDC blocked by regression test"));
+        assert_eq!(provider.status(), None);
+        let requests = network.requests.borrow();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].url.as_str(), url);
+        assert!(requests[0]
+            .data
+            .windows(b"AD.EXAMPLE.TEST".len())
+            .any(|value| value == b"AD.EXAMPLE.TEST"));
     }
 }

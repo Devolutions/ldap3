@@ -47,9 +47,15 @@ typed-builder = "0.18.1"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 sspi.workspace = true
+# Direct deps only to enable the `wasm_js` feature on the getrandom copies pulled in by sspi's
+# dependencies. The 0.4 pin must match the rc they resolve to; revisit it when they move to a stable 0.4.
+getrandom03 = { package = "getrandom", version = "0.3", default-features = false, features = ["wasm_js"] }
+getrandom04 = { package = "getrandom", version = "=0.4.0-rc.0", default-features = false, features = ["wasm_js"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 sspi = { workspace = true, features = ["network_client"] }
 
 [dev-dependencies]
 uuid = "1.5.0"
+picky-asn1-der = "0.5"
+picky-krb = "=0.12.2"

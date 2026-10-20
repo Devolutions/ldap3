@@ -317,6 +317,39 @@ pub struct SaslBindConfig {
     pub seal: Option<bool>,
 }
 
+async fn complete_sasl_authentication(
+    provider: &mut dyn SecurityProvider,
+    server_token: Option<&[u8]>,
+) -> anyhow::Result<()> {
+    if matches!(
+        provider.status(),
+        Some(sspi::SecurityStatus::Ok | sspi::SecurityStatus::CompleteNeeded)
+    ) {
+        return Ok(());
+    }
+
+    let server_token = server_token
+        .filter(|token| !token.is_empty())
+        .context("LDAP bind succeeded before the security context completed")?;
+    let output = provider
+        .step(server_token)
+        .await
+        .map_err(anyhow::Error::from_boxed)
+        .context("unable to complete LDAP SASL security context")?;
+
+    if !output.is_empty() {
+        anyhow::bail!("LDAP SASL requires another exchange after the server reported success");
+    }
+    if !matches!(
+        provider.status(),
+        Some(sspi::SecurityStatus::Ok | sspi::SecurityStatus::CompleteNeeded)
+    ) {
+        anyhow::bail!("LDAP SASL security context is not complete");
+    }
+
+    Ok(())
+}
+
 #[wasm_bindgen]
 impl LdapSession {
     pub async fn bind(
@@ -421,7 +454,12 @@ impl LdapSession {
             }
         };
 
-        let token = auth_provider.step(&[]).await.unwrap();
+        let token = auth_provider.step(&[]).await.map_err(|error| {
+            JsErrorValue::from_anyhow(
+                anyhow::Error::from_boxed(error)
+                    .context("unable to initialize LDAP SASL security context"),
+            )
+        })?;
 
         let msg = LdapMsg {
             msgid: 1,
@@ -460,6 +498,13 @@ impl LdapSession {
 
             match bind_response.res.code {
                 LdapResultCode::Success => {
+                    complete_sasl_authentication(
+                        auth_provider.as_mut(),
+                        bind_response.saslcreds.as_deref(),
+                    )
+                    .await
+                    .map_err(JsErrorValue::from_anyhow)?;
+
                     tracing::trace!("bind success");
 
                     if !sign.unwrap_or(false) && seal.is_some_and(|s| s) {
@@ -477,32 +522,33 @@ impl LdapSession {
                     break Ok(bind_response.into());
                 }
                 LdapResultCode::SaslBindInProgress => {
-                    if let Some(ref cred) = bind_response.saslcreds {
-                        tracing::info!("sasl bind in progress");
-                        let token = auth_provider.step(cred).await.map_err(|e| {
+                    tracing::info!("sasl bind in progress");
+                    let token = auth_provider
+                        .step(bind_response.saslcreds.as_deref().unwrap_or_default())
+                        .await
+                        .map_err(|e| {
                             JsErrorValue::from_anyhow(
                                 anyhow::Error::from_boxed(e)
                                     .context("error in accepting incoming sasl token"),
                             )
                         })?;
-                        let msg = LdapMsg {
-                            msgid: self.next_message_id(),
-                            op: LdapOp::BindRequest(LdapBindRequest {
-                                dn: String::default(),
-                                cred: LdapBindCred::SASL(SaslCredentials {
-                                    mechanism: "GSS-SPNEGO".to_string(),
-                                    credentials: token,
-                                }),
+                    let msg = LdapMsg {
+                        msgid: self.next_message_id(),
+                        op: LdapOp::BindRequest(LdapBindRequest {
+                            dn: String::default(),
+                            cred: LdapBindCred::SASL(SaslCredentials {
+                                mechanism: "GSS-SPNEGO".to_string(),
+                                credentials: token,
                             }),
-                            ctrl: vec![],
-                        };
+                        }),
+                        ctrl: vec![],
+                    };
 
-                        frame
-                            .send(msg)
-                            .await
-                            .context("unable to send bind request")
-                            .map_err(JsErrorValue::from_anyhow)?;
-                    }
+                    frame
+                        .send(msg)
+                        .await
+                        .context("unable to send bind request")
+                        .map_err(JsErrorValue::from_anyhow)?;
                 }
                 _ => {
                     break Err(JsErrorValue::msg(format!("bind failed: {bind_response:?}")));
@@ -551,4 +597,128 @@ pub enum SspiAuthMethod {
         kdc_proxy_url: Option<String>,
         server_computer_name: String,
     },
+}
+
+#[cfg(test)]
+mod sasl_completion_tests {
+    use super::complete_sasl_authentication;
+    use crate::authentication::{SecurityProvider, SecurityProviderError, StepResult};
+    use futures_util::future::LocalBoxFuture;
+    use futures_util::FutureExt;
+    use sspi::SecurityStatus;
+
+    struct Provider {
+        status: Option<SecurityStatus>,
+        next_status: SecurityStatus,
+        output: Vec<u8>,
+        received: Vec<u8>,
+        reject: bool,
+    }
+
+    impl SecurityProvider for Provider {
+        fn step<'a>(&'a mut self, input: &'a [u8]) -> LocalBoxFuture<'a, StepResult> {
+            Box::pin(async move {
+                self.received = input.to_vec();
+                if self.reject {
+                    return Err(Box::new(std::io::Error::other("final token rejected"))
+                        as Box<dyn std::error::Error + Send + Sync>);
+                }
+                self.status = Some(self.next_status);
+                Ok(std::mem::take(&mut self.output))
+            })
+        }
+
+        fn encrypt(&mut self, _input: &[u8]) -> Result<Vec<u8>, SecurityProviderError> {
+            unreachable!()
+        }
+
+        fn decrypt(&mut self, _input: &[u8]) -> Result<Vec<u8>, SecurityProviderError> {
+            unreachable!()
+        }
+
+        fn status(&self) -> Option<SecurityStatus> {
+            self.status
+        }
+    }
+
+    fn provider() -> Provider {
+        Provider {
+            status: Some(SecurityStatus::ContinueNeeded),
+            next_status: SecurityStatus::Ok,
+            output: Vec::new(),
+            received: Vec::new(),
+            reject: false,
+        }
+    }
+
+    #[test]
+    fn accepts_an_already_completed_context() {
+        let mut provider = provider();
+        provider.status = Some(SecurityStatus::Ok);
+
+        complete_sasl_authentication(&mut provider, None)
+            .now_or_never()
+            .expect("synchronous provider")
+            .expect("completed context");
+        assert!(provider.received.is_empty());
+    }
+
+    #[test]
+    fn consumes_the_final_server_token() {
+        let mut provider = provider();
+
+        complete_sasl_authentication(&mut provider, Some(b"final"))
+            .now_or_never()
+            .expect("synchronous provider")
+            .expect("completed context");
+        assert_eq!(provider.received, b"final");
+        assert_eq!(provider.status, Some(SecurityStatus::Ok));
+    }
+
+    #[test]
+    fn rejects_success_without_a_final_token() {
+        for token in [None, Some(&[][..])] {
+            let mut provider = provider();
+            let result = complete_sasl_authentication(&mut provider, token)
+                .now_or_never()
+                .expect("synchronous provider");
+
+            assert!(result.is_err());
+            assert!(provider.received.is_empty());
+        }
+    }
+
+    #[test]
+    fn preserves_final_token_errors() {
+        let mut provider = provider();
+        provider.reject = true;
+        let error = complete_sasl_authentication(&mut provider, Some(b"final"))
+            .now_or_never()
+            .expect("synchronous provider")
+            .expect_err("rejected token");
+
+        assert!(format!("{error:#}").contains("final token rejected"));
+    }
+
+    #[test]
+    fn rejects_an_incomplete_final_context() {
+        let mut provider = provider();
+        provider.next_status = SecurityStatus::ContinueNeeded;
+        let result = complete_sasl_authentication(&mut provider, Some(b"final"))
+            .now_or_never()
+            .expect("synchronous provider");
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn rejects_an_additional_exchange_after_success() {
+        let mut provider = provider();
+        provider.output = vec![1];
+        let result = complete_sasl_authentication(&mut provider, Some(b"final"))
+            .now_or_never()
+            .expect("synchronous provider");
+
+        assert!(result.is_err());
+    }
 }

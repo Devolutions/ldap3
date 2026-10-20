@@ -1,6 +1,6 @@
 {
   "name": "@devolutions/ldap-wasm-js",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "description": "a ldap packages exposes RUST LDAP3 to Javascript in Browser",
   "email": "jou@devolutions.net",
   "main": "./dist/ldap-wasm-js.js",
@@ -16,7 +16,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/irvingoujAtDevolution/ldap3.git"
+    "url": "git+https://github.com/Devolutions/ldap3.git"
   },
   "keywords": [
     "LDAP",
@@ -25,9 +25,9 @@
   "author": "Irving OU",
   "license": "MPL-2.0",
   "bugs": {
-    "url": "https://github.com/irvingoujAtDevolution/ldap3/issues"
+    "url": "https://github.com/Devolutions/ldap3/issues"
   },
-  "homepage": "https://github.com/irvingoujAtDevolution/ldap3#readme",
+  "homepage": "https://github.com/Devolutions/ldap3/tree/devolutions/wasm",
   "devDependencies": {
     "vite": "^4.5.0",
     "vite-plugin-dts": "^3.6.3",
