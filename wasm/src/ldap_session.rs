@@ -2,9 +2,9 @@
 // this is because Tsify and wasm-bindgen generates name in PascalCase, will look for solution later
 use crate::{
     authentication::{
-        kerberos::{KerberoAuthProvier, KerberoInitParams},
-        negotiate::NegotiateAuthProvier,
-        ntlm::NtlmAuthProvier,
+        kerberos::{KerberosAuthProvider, KerberosInitParams},
+        negotiate::NegotiateAuthProvider,
+        ntlm::NtlmAuthProvider,
         SecurityProvider, WasmNetworkClient,
     },
     dto::{
@@ -408,7 +408,7 @@ impl LdapSession {
                 server_computer_name,
             } => {
                 let res =
-                    NtlmAuthProvier::new(&username, &password, &server_computer_name, sign, seal)
+                    NtlmAuthProvider::new(&username, &password, &server_computer_name, sign, seal)
                         .map_err(JsErrorValue::from_anyhow)?;
                 Box::new(res)
             }
@@ -417,7 +417,7 @@ impl LdapSession {
                 kdc_proxy_url,
                 server_computer_name,
             } => {
-                let builder = KerberoInitParams::builder()
+                let builder = KerberosInitParams::builder()
                     .ldap_username(&username)
                     .ldap_password(&password)
                     .domain(Some(&domain))
@@ -429,7 +429,7 @@ impl LdapSession {
                     .client(Some(Box::new(WasmNetworkClient)))
                     .build();
                 let kerberos =
-                    KerberoAuthProvier::try_from(builder).map_err(JsErrorValue::from_anyhow)?;
+                    KerberosAuthProvider::try_from(builder).map_err(JsErrorValue::from_anyhow)?;
                 Box::new(kerberos)
             }
             SspiAuthMethod::Negotiate {
@@ -437,7 +437,7 @@ impl LdapSession {
                 kdc_proxy_url,
                 server_computer_name,
             } => {
-                let builder = KerberoInitParams::builder()
+                let builder = KerberosInitParams::builder()
                     .ldap_username(&username)
                     .ldap_password(&password)
                     .domain(domain.as_deref())
@@ -449,7 +449,7 @@ impl LdapSession {
                     .client(Some(Box::new(WasmNetworkClient)))
                     .build();
                 let negotiate =
-                    NegotiateAuthProvier::try_from(builder).map_err(JsErrorValue::from_anyhow)?;
+                    NegotiateAuthProvider::try_from(builder).map_err(JsErrorValue::from_anyhow)?;
                 Box::new(negotiate)
             }
         };

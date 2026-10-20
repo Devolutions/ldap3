@@ -42,7 +42,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut framed = Framed::new(tcpstream, LdapCodec::default());
 
-    let mut ntlm = AuthProvier::new(&ldap_username, &ldap_password);
+    let mut ntlm = AuthProvider::new(&ldap_username, &ldap_password);
     let ntlm_token = ntlm.step(&[]).unwrap();
 
     let msg = LdapMsg {
@@ -95,12 +95,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 }
 
-struct AuthProvier {
+struct AuthProvider {
     ntlm: Ntlm,
     credentials_handle: <Ntlm as SspiImpl>::CredentialsHandle,
 }
 
-impl AuthProvier {
+impl AuthProvider {
     fn new(ldap_username: &str, ldap_password: &str) -> Self {
         let identity = AuthIdentity {
             username: Username::parse(ldap_username).unwrap(),

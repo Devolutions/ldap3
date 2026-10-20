@@ -6,7 +6,7 @@ use sspi::{
 };
 
 use super::{SecurityProvider, SecurityProviderError, StepResult};
-pub(crate) struct NtlmAuthProvier {
+pub(crate) struct NtlmAuthProvider {
     ntlm: Ntlm,
     credentials_handle: <Ntlm as SspiImpl>::CredentialsHandle,
     server_computer_name: String,
@@ -15,7 +15,7 @@ pub(crate) struct NtlmAuthProvier {
     status: Option<SecurityStatus>,
 }
 
-impl NtlmAuthProvier {
+impl NtlmAuthProvider {
     pub(crate) fn new(
         ldap_username: &str,
         ldap_password: &str,
@@ -46,7 +46,7 @@ impl NtlmAuthProvier {
         })
     }
 }
-impl SecurityProvider for NtlmAuthProvier {
+impl SecurityProvider for NtlmAuthProvider {
     fn step<'a>(&'a mut self, input: &'a [u8]) -> LocalBoxFuture<'a, StepResult> {
         Box::pin(async move {
             let mut output_buffer = vec![SecurityBuffer::new(Vec::new(), BufferType::Token)];
